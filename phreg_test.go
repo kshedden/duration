@@ -28,6 +28,9 @@ func TestPhreg1(t *testing.T) {
 
 	ph := NewPHReg(da, "Time", "Status").Done()
 
+	da.Reset()
+	phr := NewPHReg(da, "Time", "Status").L2Wgts([]float64{0}).Done()
+
 	if fmt.Sprintf("%v", ph.enter) != "[[[0 1 2 3 4 5] []]]" {
 		t.Fail()
 	}
@@ -39,33 +42,43 @@ func TestPhreg1(t *testing.T) {
 	}
 
 	ll := -14.415134793348063
-	if math.Abs(ph.breslowLogLike([]float64{2})-ll) > 1e-5 {
-		t.Fail()
+	for _, pq := range []*PHReg{ph, phr} {
+		if math.Abs(pq.breslowLogLike([]float64{2})-ll) > 1e-5 {
+			t.Fail()
+		}
 	}
 
 	ll = -8.9840993267811093
-	if math.Abs(ph.breslowLogLike([]float64{1})-ll) > 1e-5 {
-		t.Fail()
+	for _, pq := range []*PHReg{ph, phr} {
+		if math.Abs(pq.breslowLogLike([]float64{1})-ll) > 1e-5 {
+			t.Fail()
+		}
 	}
 
 	score := make([]float64, 1)
 	sc := -5.66698338
-	ph.breslowScore([]float64{2}, score)
-	if math.Abs(score[0]-sc) > 1e-5 {
-		t.Fail()
+	for _, pq := range []*PHReg{ph, phr} {
+		pq.breslowScore([]float64{2}, score)
+		if math.Abs(score[0]-sc) > 1e-5 {
+			t.Fail()
+		}
 	}
 
 	sc = -5.09729328
-	ph.breslowScore([]float64{1}, score)
-	if math.Abs(score[0]-sc) > 1e-5 {
-		t.Fail()
+	for _, pq := range []*PHReg{ph, phr} {
+		pq.breslowScore([]float64{1}, score)
+		if math.Abs(score[0]-sc) > 1e-5 {
+			t.Fail()
+		}
 	}
 
 	hv := -0.93879427
 	hess := make([]float64, 1)
-	ph.breslowHess([]float64{1}, hess)
-	if math.Abs(hess[0]-hv) > 1e-5 {
-		t.Fail()
+	for _, pq := range []*PHReg{ph, phr} {
+		pq.breslowHess([]float64{1}, hess)
+		if math.Abs(hess[0]-hv) > 1e-5 {
+			t.Fail()
+		}
 	}
 }
 

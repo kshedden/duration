@@ -51,19 +51,28 @@ type PHReg struct {
 	// The sum of covariates with events in each stratum
 	sumx [][]float64
 
+	// L2 (ridge) weights for each variable
+	l2wgts []float64
+
 	// The positions of the covariates in the Dstream
 	xpos []int
 
 	// Optimization settings
 	settings *optimize.Settings
 
-	// Idnicates that Done has already been called
+	// Indicates that Done has already been called
 	done bool
 }
 
 // The number of parameters (regression coefficients).
 func (ph *PHReg) NumParams() int {
 	return len(ph.xpos)
+}
+
+// L2Wgts sets L2 (ridge) weights to be used when fitting the model.
+func (ph *PHReg) L2Wgts(w []float64) *PHReg {
+	ph.l2wgts = w
+	return ph
 }
 
 // The positions of the covariates in the Dstream.
@@ -272,7 +281,17 @@ func (ph *PHReg) setup() {
 // LogLike returns the log-likelihood at the given parameter value.
 func (ph *PHReg) LogLike(params statmodel.Parameter) float64 {
 	par := params.([]float64)
-	return ph.breslowLogLike(par)
+
+	ll := ph.breslowLogLike(par)
+
+	// Account for L2 weights if present.
+	if len(ph.l2wgts) > 0 {
+		for j := 0; j < len(par); j++ {
+			ll -= ph.l2wgts[j] * par[j] * par[j]
+		}
+	}
+
+	return ll
 }
 
 // breslowLogLike returns the log-likelihood value for the
@@ -328,8 +347,16 @@ func zero(x []float64) {
 // Score computes the score vector for the proportional hazards
 // regression model at the given parameter setting.
 func (ph *PHReg) Score(params statmodel.Parameter, score []float64) {
+
 	par := params.([]float64)
 	ph.breslowScore(par, score)
+
+	// Account for L2 weights if present.
+	if len(ph.l2wgts) > 0 {
+		for j := 0; j < len(par); j++ {
+			score[j] -= 2 * ph.l2wgts[j] * par[j]
+		}
+	}
 }
 
 // breslowScore calculates the score vector for the proportional
@@ -400,8 +427,18 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 // given parameter setting.  The Hessian type parameter is not used
 // here.
 func (ph *PHReg) Hessian(params statmodel.Parameter, ht statmodel.HessType, hess []float64) {
+
 	par := params.([]float64)
 	ph.breslowHess(par, hess)
+
+	// Account for L2 weights if present.
+	p := len(par)
+	if len(ph.l2wgts) > 0 {
+		for j := 0; j < len(par); j++ {
+			k := j*p + j
+			hess[k] -= 2 * ph.l2wgts[j]
+		}
+	}
 }
 
 // breslowHess calculates the Hessian matrix for the proportional
