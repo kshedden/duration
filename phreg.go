@@ -661,7 +661,7 @@ func (ph *PHReg) Fit() *PHResults {
 
 	params := optrslt.X
 	ll := -optrslt.F
-	vcov := statmodel.GetVcov(ph, params)
+	vcov, _ := statmodel.GetVcov(ph, params)
 
 	var xn []string
 	na := ph.data.Names()
@@ -709,6 +709,10 @@ func (rslt *PHResults) Summary() string {
 
 	if pe > 0 {
 		s += fmt.Sprintf("%d observations have positive entry times\n", pe)
+	}
+
+	if rslt.StdErr() == nil {
+		s += fmt.Sprintf("Standard errors were not available from this fit\n")
 	}
 	s += "\n"
 
