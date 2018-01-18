@@ -6,8 +6,9 @@ import (
 	"os"
 	"sort"
 
-	"github.com/gonum/floats"
-	"github.com/gonum/optimize"
+	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/optimize"
+
 	"github.com/kshedden/dstream/dstream"
 	"github.com/kshedden/statmodel"
 )
@@ -59,6 +60,9 @@ type PHReg struct {
 
 	// Optimization settings
 	settings *optimize.Settings
+
+	// Optimization method
+	method optimize.Method
 
 	// Indicates that Done has already been called
 	done bool
@@ -616,6 +620,12 @@ func (ph *PHReg) failMessage(optrslt *optimize.Result) {
 	}
 }
 
+// Optimizer sets the optimization method from gonum.Optimize.
+func (ph *PHReg) Optimizer(method optimize.Method) *PHReg {
+	ph.method = method
+	return ph
+}
+
 // Fit fits the model to the data.
 func (ph *PHReg) Fit() *PHResults {
 
@@ -636,6 +646,7 @@ func (ph *PHReg) Fit() *PHResults {
 			ph.Score(x, grad)
 			negative(grad)
 		},
+		// If we pass the Hessian we should be able to use Newton
 	}
 
 	if ph.settings == nil {
@@ -648,9 +659,11 @@ func (ph *PHReg) Fit() *PHResults {
 		}
 	}
 
-	opt := &optimize.BFGS{}
+	if ph.method == nil {
+		ph.method = &optimize.BFGS{}
+	}
 
-	optrslt, err := optimize.Local(p, ph.start, ph.settings, opt)
+	optrslt, err := optimize.Local(p, ph.start, ph.settings, ph.method)
 	if err != nil {
 		ph.failMessage(optrslt)
 		panic(err)
