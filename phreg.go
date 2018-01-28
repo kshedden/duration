@@ -49,6 +49,14 @@ type PHReg struct {
 	// the jth distinct time in stratum i
 	exit [][][]int
 
+	// The L2 norm of every covariate.  If scale=trure,
+	// calculations are done on normalized covariates.
+	xn []float64
+
+	// If scale = true, calculations are done on normalized
+	// covariates.
+	scale bool
+
 	// The sum of covariates with events in each stratum
 	sumx [][]float64
 
@@ -76,6 +84,12 @@ func (ph *PHReg) NumParams() int {
 // L2Wgts sets L2 (ridge) weights to be used when fitting the model.
 func (ph *PHReg) L2Wgts(w []float64) *PHReg {
 	ph.l2wgts = w
+	return ph
+}
+
+// If true, covariates are internally rescaled.
+func (ph *PHReg) Scale() *PHReg {
+	ph.scale = true
 	return ph
 }
 
@@ -146,13 +160,39 @@ func (ph *PHReg) findvars() {
 		msg := fmt.Sprintf("Event status variable '%s' not found\n", ph.statusvar)
 		panic(msg)
 	}
+	if ph.entryvar != "" && ph.entryvarpos == -1 {
+		msg := fmt.Sprintf("Entry variable '%s' not found\n", ph.entryvar)
+		panic(msg)
+	}
 }
 
 func (ph *PHReg) setup() {
 
 	ph.findvars()
 
+	// Calculate the L2 norms of the covariates.
 	ph.data.Reset()
+	ph.xn = make([]float64, len(ph.xpos))
+	if ph.scale {
+		for ph.data.Next() {
+			for j, k := range ph.xpos {
+				x := ph.data.GetPos(k).([]float64)
+				for i := range x {
+					ph.xn[j] += x[i] * x[i]
+				}
+			}
+		}
+		for j := range ph.xn {
+			ph.xn[j] = math.Sqrt(ph.xn[j])
+		}
+	} else {
+		for k := range ph.xn {
+			ph.xn[k] = 1
+		}
+	}
+
+	ph.data.Reset()
+	nskip := 0
 
 	// Each chunk is a stratum
 	for s := 0; ph.data.Next(); s++ {
@@ -218,6 +258,7 @@ func (ph *PHReg) setup() {
 				} else if ii == 0 {
 					// Censored before first event, never enters
 					skip[i] = true
+					nskip++
 				} else {
 					// Censored between event times
 					exit[ii-1] = append(exit[ii-1], i)
@@ -232,7 +273,7 @@ func (ph *PHReg) setup() {
 			x := ph.data.GetPos(j).([]float64)
 			for i, v := range x {
 				if !skip[i] && status[i] == 1 {
-					sumx[k] += v
+					sumx[k] += v / ph.xn[k]
 				}
 			}
 		}
@@ -280,6 +321,10 @@ func (ph *PHReg) setup() {
 			}
 		}
 	}
+
+	if nskip > 0 {
+		fmt.Printf("%d observations dropped for being censored before the first event\n", nskip)
+	}
 }
 
 // LogLike returns the log-likelihood at the given parameter value.
@@ -315,8 +360,14 @@ func (ph *PHReg) breslowLogLike(params []float64) float64 {
 		for k, j := range ph.xpos {
 			x := ph.data.GetPos(j).([]float64)
 			for i, v := range x {
-				lp[i] += v * params[k]
+				lp[i] += v * params[k] / ph.xn[k]
 			}
+		}
+
+		// DEBUG
+		mx := floats.Max(lp)
+		for i := range lp {
+			lp[i] -= mx
 		}
 
 		rlp := float64(0)
@@ -395,8 +446,14 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 		for k := range ph.xpos {
 			x := xvars[k]
 			for i, v := range x {
-				lp[i] += v * params[k]
+				lp[i] += v * params[k] / ph.xn[k]
 			}
+		}
+
+		// DEBUG
+		mx := floats.Max(lp)
+		for i := range lp {
+			lp[i] -= mx
 		}
 
 		rlp := float64(0)
@@ -408,7 +465,7 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 				f := math.Exp(lp[i])
 				rlp += f
 				for j, x := range xvars {
-					rlpv[j] += f * x[i]
+					rlpv[j] += f * x[i] / ph.xn[j]
 				}
 			}
 
@@ -420,7 +477,7 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 				f := math.Exp(lp[i])
 				rlp -= f
 				for j, x := range xvars {
-					rlpv[j] -= f * x[i]
+					rlpv[j] -= f * x[i] / ph.xn[j]
 				}
 			}
 		}
@@ -627,7 +684,7 @@ func (ph *PHReg) Optimizer(method optimize.Method) *PHReg {
 }
 
 // Fit fits the model to the data.
-func (ph *PHReg) Fit() *PHResults {
+func (ph *PHReg) Fit() (*PHResults, error) {
 
 	if !ph.done {
 		msg := fmt.Sprintf("PHReg: must call Done before calling Fit")
@@ -654,7 +711,7 @@ func (ph *PHReg) Fit() *PHResults {
 		ph.settings.Recorder = nil
 		ph.settings.GradientThreshold = 1e-5
 		ph.settings.FunctionConverge = &optimize.FunctionConverge{
-			Absolute:   1e-6,
+			Absolute:   1e-14,
 			Iterations: 200,
 		}
 	}
@@ -663,34 +720,57 @@ func (ph *PHReg) Fit() *PHResults {
 		ph.method = &optimize.BFGS{}
 	}
 
-	optrslt, err := optimize.Local(p, ph.start, ph.settings, ph.method)
-	if err != nil {
-		ph.failMessage(optrslt)
-		panic(err)
-	}
-	if err = optrslt.Status.Err(); err != nil {
-		panic(err)
-	}
-
-	params := optrslt.X
-	ll := -optrslt.F
-	vcov, _ := statmodel.GetVcov(ph, params)
-
 	var xn []string
 	na := ph.data.Names()
 	for _, k := range ph.xpos {
 		xn = append(xn, na[k])
 	}
 
+	optrslt, err := optimize.Local(p, ph.start, ph.settings, ph.method)
+	if err != nil {
+		// Return a partial results with an error
+		results := &PHResults{
+			BaseResults: statmodel.NewBaseResults(ph,
+				-optrslt.F, optrslt.X, xn, nil),
+		}
+		ph.failMessage(optrslt)
+		return results, err
+	}
+	if err = optrslt.Status.Err(); err != nil {
+		return nil, err
+	}
+
+	params := make([]float64, len(optrslt.X))
+	for j := range optrslt.X {
+		params[j] = optrslt.X[j] / ph.xn[j]
+	}
+
+	ll := -optrslt.F
+	vcov, _ := statmodel.GetVcov(ph, params)
+
 	results := &PHResults{
 		BaseResults: statmodel.NewBaseResults(ph,
 			ll, params, xn, vcov),
 	}
 
-	return results
+	return results, nil
 }
 
-func (rslt *PHResults) Summary() string {
+// ScaleVec scales a vector x (compatible in length with the parameter
+// vector), to match the internal scaling of the covariates.  If Scale
+// has not been called when constructing the model, this does nothing,
+// as n(o adjustment is needed.
+func (ph *PHReg) ScaleVec(x []float64) []float64 {
+
+	y := make([]float64, len(x))
+	for i := range x {
+		y[i] = ph.xn[i] * x[i]
+	}
+
+	return y
+}
+
+func (rslt *PHResults) summaryStats() (int, int, int, int) {
 
 	ph := rslt.Model().(*PHReg)
 	data := ph.DataSet()
@@ -714,20 +794,66 @@ func (rslt *PHResults) Summary() string {
 		ns++
 	}
 
-	h := "\n             Proportional hazards regression analysis\n"
-	h += "========================================================================\n"
-	h += fmt.Sprintf("Sample size: %8d           Events: %d\n", n, e)
-	h += fmt.Sprintf("Strata:      %8d           Ties: Breslow\n", ns)
-	s := rslt.BaseResults.Summary()
+	return n, e, pe, ns
+}
+
+func (rslt *PHResults) Summary() string {
+
+	n, e, pe, ns := rslt.summaryStats()
+
+	sum := &statmodel.Summary{}
+
+	sum.Title = "Proportional hazards regression analysis"
+
+	sum.Top = append(sum.Top, fmt.Sprintf("  Sample size: %10d", n))
+	sum.Top = append(sum.Top, fmt.Sprintf("  Strata:      %10d", ns))
+	sum.Top = append(sum.Top, fmt.Sprintf("  Events:      %10d", e))
+	sum.Top = append(sum.Top, "  Ties:           Breslow")
+
+	sum.ColNames = []string{"Variable   ", "Coefficient", "SE", "HR", "LCB", "UCB", "Z-score", "P-value"}
+
+	fs := func(x interface{}, h string) []string {
+		y := x.([]string)
+		m := len(h)
+		for i := range y {
+			if len(y[i]) > m {
+				m = len(y[i])
+			}
+		}
+		var z []string
+		for i := range y {
+			c := fmt.Sprintf("%%-%ds", m)
+			z = append(z, fmt.Sprintf(c, y[i]))
+		}
+		return z
+	}
+
+	fn := func(x interface{}, h string) []string {
+		y := x.([]float64)
+		var s []string
+		for i := range y {
+			s = append(s, fmt.Sprintf("%10.4f", y[i]))
+		}
+		return s
+	}
+
+	sum.ColFmt = []statmodel.Fmter{fs, fn, fn, fn, fn, fn, fn, fn}
+
+	// Create estimate and CI for the hazard ratio
+	var hr, lcb, ucb []float64
+	for j := range rslt.Params() {
+		hr = append(hr, math.Exp(rslt.Params()[j]))
+		lcb = append(lcb, math.Exp(rslt.Params()[j]-2*rslt.StdErr()[j]))
+		ucb = append(ucb, math.Exp(rslt.Params()[j]+2*rslt.StdErr()[j]))
+	}
+
+	sum.Cols = []interface{}{rslt.Names(), rslt.Params(), rslt.StdErr(), hr, lcb, ucb,
+		rslt.ZScores(), rslt.PValues()}
 
 	if pe > 0 {
-		s += fmt.Sprintf("%d observations have positive entry times\n", pe)
+		msg := fmt.Sprintf("%d observations have positive entry times", pe)
+		sum.Msg = append(sum.Msg, msg)
 	}
 
-	if rslt.StdErr() == nil {
-		s += fmt.Sprintf("Standard errors were not available from this fit\n")
-	}
-	s += "\n"
-
-	return h + s
+	return sum.String()
 }
