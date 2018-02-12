@@ -13,7 +13,31 @@ import (
 	"github.com/kshedden/statmodel"
 )
 
-// PHReg describes a proportional hazards regression model for right censored data.
+// PHParameter contains a parameter value for a proportional hazards
+// regression model.
+type PHParameter struct {
+	coeff []float64
+}
+
+// GetCoeff returns the array of model coefficients from a parameter value.
+func (p *PHParameter) GetCoeff() []float64 {
+	return p.coeff
+}
+
+// SetCoeff sets the array of model coefficients for a parameter value.
+func (p *PHParameter) SetCoeff(x []float64) {
+	copy(p.coeff, x)
+}
+
+// Clone returns a deep copy of the parameter value.
+func (p *PHParameter) Clone() statmodel.Parameter {
+	q := make([]float64, len(p.coeff))
+	copy(q, p.coeff)
+	return &PHParameter{q}
+}
+
+// PHReg describes a proportional hazards regression model for right
+// censored data.
 type PHReg struct {
 
 	// The data to which the model is fit
@@ -49,13 +73,13 @@ type PHReg struct {
 	// the jth distinct time in stratum i
 	exit [][][]int
 
-	// The L2 norm of every covariate.  If scale=true,
+	// The L2 norm of every covariate.  If norm=true,
 	// calculations are done on normalized covariates.
 	xn []float64
 
-	// If scale = true, calculations are done on normalized
+	// If norm=true, calculations are done on normalized
 	// covariates.
-	scale bool
+	norm bool
 
 	// The sum of covariates with events in each stratum
 	sumx [][]float64
@@ -88,12 +112,12 @@ func (ph *PHReg) L2Wgts(w []float64) *PHReg {
 }
 
 // If true, covariates are internally rescaled.
-func (ph *PHReg) Scale() *PHReg {
-	ph.scale = true
+func (ph *PHReg) Norm() *PHReg {
+	ph.norm = true
 	return ph
 }
 
-// The positions of the covariates in the Dstream.
+// The positions of the covariates in the model's data..
 func (ph *PHReg) Xpos() []int {
 	return ph.xpos
 }
@@ -173,7 +197,7 @@ func (ph *PHReg) setup() {
 	// Calculate the L2 norms of the covariates.
 	ph.data.Reset()
 	ph.xn = make([]float64, len(ph.xpos))
-	if ph.scale {
+	if ph.norm {
 		for ph.data.Next() {
 			for j, k := range ph.xpos {
 				x := ph.data.GetPos(k).([]float64)
@@ -328,15 +352,16 @@ func (ph *PHReg) setup() {
 }
 
 // LogLike returns the log-likelihood at the given parameter value.
-func (ph *PHReg) LogLike(params statmodel.Parameter) float64 {
-	par := params.([]float64)
+func (ph *PHReg) LogLike(param statmodel.Parameter) float64 {
 
-	ll := ph.breslowLogLike(par)
+	coeff := param.GetCoeff()
+
+	ll := ph.breslowLogLike(coeff)
 
 	// Account for L2 weights if present.
 	if len(ph.l2wgts) > 0 {
-		for j := 0; j < len(par); j++ {
-			ll -= ph.l2wgts[j] * par[j] * par[j]
+		for j, x := range coeff {
+			ll -= ph.l2wgts[j] * x * x
 		}
 	}
 
@@ -404,13 +429,13 @@ func zero(x []float64) {
 // regression model at the given parameter setting.
 func (ph *PHReg) Score(params statmodel.Parameter, score []float64) {
 
-	par := params.([]float64)
-	ph.breslowScore(par, score)
+	coeff := params.GetCoeff()
+	ph.breslowScore(coeff, score)
 
 	// Account for L2 weights if present.
 	if len(ph.l2wgts) > 0 {
-		for j := 0; j < len(par); j++ {
-			score[j] -= 2 * ph.l2wgts[j] * par[j]
+		for j, x := range coeff {
+			score[j] -= 2 * ph.l2wgts[j] * x
 		}
 	}
 }
@@ -491,13 +516,13 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 // here.
 func (ph *PHReg) Hessian(params statmodel.Parameter, ht statmodel.HessType, hess []float64) {
 
-	par := params.([]float64)
-	ph.breslowHess(par, hess)
+	coeff := params.GetCoeff()
+	ph.breslowHess(coeff, hess)
 
 	// Account for L2 weights if present.
-	p := len(par)
+	p := len(coeff)
 	if len(ph.l2wgts) > 0 {
-		for j := 0; j < len(par); j++ {
+		for j := 0; j < len(coeff); j++ {
 			k := j*p + j
 			hess[k] -= 2 * ph.l2wgts[j]
 		}
@@ -700,9 +725,11 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 	}
 
 	p := optimize.Problem{
-		Func: func(x []float64) float64 { return -ph.LogLike(x) },
+		Func: func(x []float64) float64 {
+			return -ph.LogLike(&PHParameter{x})
+		},
 		Grad: func(grad, x []float64) {
-			ph.Score(x, grad)
+			ph.Score(&PHParameter{x}, grad)
 			negative(grad)
 		},
 		// If we pass the Hessian we should be able to use Newton
@@ -741,16 +768,16 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 		return nil, err
 	}
 
-	params := make([]float64, len(optrslt.X))
+	param := make([]float64, len(optrslt.X))
 	for j := range optrslt.X {
-		params[j] = optrslt.X[j] / ph.xn[j]
+		param[j] = optrslt.X[j] / ph.xn[j]
 	}
 
 	ll := -optrslt.F
-	vcov, _ := statmodel.GetVcov(ph, params)
+	vcov, _ := statmodel.GetVcov(ph, &PHParameter{param})
 
 	results := &PHResults{
-		BaseResults: statmodel.NewBaseResults(ph, ll, params, xn, vcov),
+		BaseResults: statmodel.NewBaseResults(ph, ll, param, xn, vcov),
 	}
 
 	return results, nil
@@ -759,7 +786,7 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 // ScaleVec scales a vector x (compatible in length with the parameter
 // vector), to match the internal scaling of the covariates.  If Scale
 // has not been called when constructing the model, this does nothing,
-// as n(o adjustment is needed.
+// as no adjustment is needed.
 func (ph *PHReg) ScaleVec(x []float64) []float64 {
 
 	y := make([]float64, len(x))

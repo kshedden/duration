@@ -227,7 +227,7 @@ func TestPhregScaling(t *testing.T) {
 	da = dstream.DropCols(da, []string{"Stratum"})
 
 	ph1 := NewPHReg(da, "Time", "Status").Entry("Entry").Done()
-	ph2 := NewPHReg(da, "Time", "Status").Entry("Entry").Scale().Done()
+	ph2 := NewPHReg(da, "Time", "Status").Entry("Entry").Norm().Done()
 
 	r1, err := ph1.Fit()
 	if err != nil {
