@@ -49,7 +49,7 @@ type PHReg struct {
 	// the jth distinct time in stratum i
 	exit [][][]int
 
-	// The L2 norm of every covariate.  If scale=trure,
+	// The L2 norm of every covariate.  If scale=true,
 	// calculations are done on normalized covariates.
 	xn []float64
 
@@ -364,7 +364,8 @@ func (ph *PHReg) breslowLogLike(params []float64) float64 {
 			}
 		}
 
-		// DEBUG
+		// We can add any constant here due to invariance in
+		// the partial likelihood.
 		mx := floats.Max(lp)
 		for i := range lp {
 			lp[i] -= mx
@@ -450,7 +451,8 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 			}
 		}
 
-		// DEBUG
+		// We can add any constant here due to invariance in
+		// the partial likelihood.
 		mx := floats.Max(lp)
 		for i := range lp {
 			lp[i] -= mx
@@ -730,8 +732,7 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 	if err != nil {
 		// Return a partial results with an error
 		results := &PHResults{
-			BaseResults: statmodel.NewBaseResults(ph,
-				-optrslt.F, optrslt.X, xn, nil),
+			BaseResults: statmodel.NewBaseResults(ph, -optrslt.F, optrslt.X, xn, nil),
 		}
 		ph.failMessage(optrslt)
 		return results, err
@@ -749,8 +750,7 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 	vcov, _ := statmodel.GetVcov(ph, params)
 
 	results := &PHResults{
-		BaseResults: statmodel.NewBaseResults(ph,
-			ll, params, xn, vcov),
+		BaseResults: statmodel.NewBaseResults(ph, ll, params, xn, vcov),
 	}
 
 	return results, nil

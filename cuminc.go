@@ -14,23 +14,23 @@ import (
 type CumincRight struct {
 
 	// The data used to perform the estimation.
-	Data dstream.Dstream
+	data dstream.Dstream
 
 	// The name of the variable containing the minimum of the
 	// event time and entry time.  The underlying data must have
 	// float64 type.
-	TimeVar string
+	timeVar string
 
 	// The name of a variable containing the status indicator,
 	// which is 1, 2, ... for the event types, and 0 for a
 	// censored outcome.
-	StatusVar string
+	statusVar string
 
 	// The name of a variable containing case weights, optional.
-	WeightVar string
+	weightVar string
 
 	// The name of a variable containing entry times, optional.
-	EntryVar string
+	entryVar string
 
 	// Times at which events occur, sorted.
 	Times []float64
@@ -62,63 +62,102 @@ type CumincRight struct {
 	total     map[float64]float64
 	entry     map[float64]float64
 
-	timepos   int
-	statuspos int
-	weightpos int
-	entrypos  int
+	timePos   int
+	statusPos int
+	weightPos int
+	entryPos  int
+
+	varPos map[string]int
+}
+
+func NewCumincRight(data dstream.Dstream, timevar, statusvar string) *CumincRight {
+
+	m := make(map[string]int)
+	names := data.Names()
+	for j, x := range names {
+		m[x] = j
+	}
+
+	timepos, ok := m[timevar]
+	if !ok {
+		msg := fmt.Sprintf("Time variable '%s' not found.", timevar)
+		panic(msg)
+	}
+
+	statuspos, ok := m[statusvar]
+	if !ok {
+		msg := fmt.Sprintf("Status variable '%s' not found.", statusvar)
+		panic(msg)
+	}
+
+	return &CumincRight{
+		data:      data,
+		timeVar:   timevar,
+		statusVar: statusvar,
+		timePos:   timepos,
+		statusPos: statuspos,
+		weightPos: -1,
+		entryPos:  -1,
+		varPos:    m,
+	}
+}
+
+// Weights specifies a variable that povides case weights.
+func (c *CumincRight) Weights(weightvar string) *CumincRight {
+
+	var ok bool
+	c.weightPos, ok = c.varPos[weightvar]
+	if !ok {
+		msg := fmt.Sprintf("Cannot find weight variable '%s'\n", weightvar)
+		panic(msg)
+	}
+	c.weightVar = weightvar
+
+	return c
+}
+
+// Entry specifies a variable that provides entry times.
+func (c *CumincRight) Entry(entryvar string) *CumincRight {
+
+	var ok bool
+	c.entryPos, ok = c.varPos[entryvar]
+	if !ok {
+		msg := fmt.Sprintf("Cannot find entry variable '%s'\n", entryvar)
+		panic(msg)
+	}
+	c.entryVar = entryvar
+
+	return c
 }
 
 func (ci *CumincRight) init() {
-
 	ci.eventsall = make(map[float64]float64)
 	ci.total = make(map[float64]float64)
 	ci.entry = make(map[float64]float64)
-
-	ci.Data.Reset()
-
-	ci.timepos = -1
-	ci.statuspos = -1
-	ci.weightpos = -1
-	ci.entrypos = -1
-
-	for k, n := range ci.Data.Names() {
-		if n == ci.TimeVar {
-			ci.timepos = k
-		} else if n == ci.StatusVar {
-			ci.statuspos = k
-		} else if n == ci.WeightVar {
-			ci.weightpos = k
-		} else if n == ci.EntryVar {
-			ci.entrypos = k
-		}
-	}
-
-	if ci.timepos == -1 {
-		panic("Time variable not found")
-	}
+	ci.data.Reset()
 }
 
 func (ci *CumincRight) scanData() {
 
-	for j := 0; ci.Data.Next(); j++ {
+	for j := 0; ci.data.Next(); j++ {
 
-		time := ci.Data.GetPos(ci.timepos).([]float64)
-		status := ci.Data.GetPos(ci.statuspos).([]float64)
+		time := ci.data.GetPos(ci.timePos).([]float64)
+		status := ci.data.GetPos(ci.statusPos).([]float64)
 
 		var entry []float64
-		if ci.entrypos != -1 {
-			entry = ci.Data.GetPos(ci.entrypos).([]float64)
+		if ci.entryPos != -1 {
+			entry = ci.data.GetPos(ci.entryPos).([]float64)
 		}
 
 		var weight []float64
-		if ci.weightpos != -1 {
-			weight = ci.Data.GetPos(ci.weightpos).([]float64)
+		if ci.weightPos != -1 {
+			weight = ci.data.GetPos(ci.weightPos).([]float64)
 		}
 
 		for i, t := range time {
 
 			w := float64(1)
-			if ci.weightpos != -1 {
+			if ci.weightPos != -1 {
 				w = weight[i]
 			}
 
@@ -134,9 +173,9 @@ func (ci *CumincRight) scanData() {
 			}
 			ci.total[t] += w
 
-			if ci.entrypos != -1 {
+			if ci.entryPos != -1 {
 				if entry[i] >= t {
-					msg := fmt.Sprintf("Entry time %d in chunk %d is before the event/censoring times",
+					msg := fmt.Sprintf("Entry time %d in chunk %d is before the event/censoring times\n",
 						i, j)
 					os.Stderr.WriteString(msg)
 					os.Exit(1)
@@ -169,7 +208,7 @@ func (ci *CumincRight) eventstats() {
 	rollback(ci.NRisk)
 
 	// Adjust for entry times
-	if ci.entrypos != -1 {
+	if ci.entryPos != -1 {
 		entry := make([]float64, len(ci.Times))
 		for t, w := range ci.entry {
 			ii := sort.SearchFloat64s(ci.Times, t)
@@ -289,8 +328,7 @@ func (ci *CumincRight) compress() {
 	}
 }
 
-func (ci *CumincRight) Fit() {
-
+func (ci *CumincRight) Done() *CumincRight {
 	ci.init()
 	ci.scanData()
 	ci.eventstats()
@@ -298,4 +336,5 @@ func (ci *CumincRight) Fit() {
 	ci.fitall()
 	ci.fit()
 	ci.fitse()
+	return ci
 }

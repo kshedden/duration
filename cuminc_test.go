@@ -24,13 +24,7 @@ func TestCI1(t *testing.T) {
 	na := []string{"Time", "Status"}
 	data := dstream.NewFromArrays(z, na)
 
-	ci := CumincRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-	}
-
-	ci.Fit()
+	ci := NewCumincRight(data, "Time", "Status").Done()
 
 	// Check times
 	for i := 0; i < 10; i++ {
@@ -68,13 +62,7 @@ func TestCI2(t *testing.T) {
 	na := []string{"Time", "Status"}
 	data := dstream.NewFromArrays(z, na)
 
-	ci := CumincRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-	}
-
-	ci.Fit()
+	ci := NewCumincRight(data, "Time", "Status").Done()
 
 	// Check times
 	ttimes := []float64{1, 2, 4, 6, 7}
@@ -135,13 +123,7 @@ func TestCI3(t *testing.T) {
 	na := []string{"Time", "Status"}
 	data := dstream.NewFromArrays(z, na)
 
-	ci := CumincRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-	}
-
-	ci.Fit()
+	ci := NewCumincRight(data, "Time", "Status").Done()
 
 	// Check times
 	for i := 0; i < 10; i++ {
