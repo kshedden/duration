@@ -30,7 +30,7 @@ func TestPhreg1(t *testing.T) {
 	ph := NewPHReg(da, "Time", "Status").Done()
 
 	da.Reset()
-	phr := NewPHReg(da, "Time", "Status").L2Wgts([]float64{0}).Done()
+	phr := NewPHReg(da, "Time", "Status").L2Weight([]float64{0}).Done()
 
 	if fmt.Sprintf("%v", ph.enter) != "[[[0 1 2 3 4 5] []]]" {
 		t.Fail()
@@ -52,7 +52,7 @@ func TestPhreg1(t *testing.T) {
 	ll = -8.9840993267811093
 	for _, pq := range []*PHReg{ph, phr} {
 		if math.Abs(pq.breslowLogLike([]float64{1})-ll) > 1e-5 {
-			//t.Fail()
+			t.Fail()
 		}
 	}
 
@@ -61,7 +61,7 @@ func TestPhreg1(t *testing.T) {
 	for _, pq := range []*PHReg{ph, phr} {
 		pq.breslowScore([]float64{2}, score)
 		if math.Abs(score[0]-sc) > 1e-5 {
-			//t.Fail()
+			t.Fail()
 		}
 	}
 
@@ -69,7 +69,7 @@ func TestPhreg1(t *testing.T) {
 	for _, pq := range []*PHReg{ph, phr} {
 		pq.breslowScore([]float64{1}, score)
 		if math.Abs(score[0]-sc) > 1e-5 {
-			//t.Fail()
+			t.Fail()
 		}
 	}
 
@@ -78,7 +78,7 @@ func TestPhreg1(t *testing.T) {
 	for _, pq := range []*PHReg{ph, phr} {
 		pq.breslowHess([]float64{1}, hess)
 		if math.Abs(hess[0]-hv) > 1e-5 {
-			//t.Fail()
+			t.Fail()
 		}
 	}
 }
@@ -244,5 +244,43 @@ func TestPhregScaling(t *testing.T) {
 	}
 	if !floats.EqualApprox(r1.StdErr(), r2.StdErr(), 1e-5) {
 		t.Fail()
+	}
+}
+
+func TestRegularized(t *testing.T) {
+
+	data := `Time,Status,X1,X2
+1,1,4,3
+1,1,2,2
+2,0,5,2
+3,0,6,0
+3,1,6,5
+4,0,5,4
+5,0,4,5
+5,1,3,6
+6,1,3,5
+7,1,5,4
+`
+
+	b := bytes.NewBuffer([]byte(data))
+	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X1", "X2"}).HasHeader().Done()
+	da = dstream.MemCopy(da)
+
+	pe := [][]float64{{-0.499512, -0.127350}, {-0.4776306, -0.11111450}, {-0.4555054, -0.0946655}}
+
+	for j, wt := range []float64{0.01, 0.02, 0.03} {
+
+		l1wgts := []float64{wt, wt}
+		ph := NewPHReg(da, "Time", "Status").L1Weight(l1wgts).Done()
+		rslt, err := ph.Fit()
+		if err != nil {
+			panic(err)
+		}
+
+		if !floats.EqualApprox(rslt.Params(), pe[j], 1e-5) {
+			fmt.Printf("%d\n%v\n", j, rslt.Params())
+			t.Fail()
+		}
+		_ = rslt.Summary()
 	}
 }
