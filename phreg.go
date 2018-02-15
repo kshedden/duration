@@ -1,5 +1,5 @@
 // Package duration supports various methods for statistical analysis
-// of duration data (also known as "survival analysis").
+// of duration data (survival analysis).
 package duration
 
 import (

@@ -268,7 +268,7 @@ func TestRegularized(t *testing.T) {
 
 	pe := [][]float64{{-0.499512, -0.127350}, {-0.4776306, -0.11111450}, {-0.4555054, -0.0946655}}
 
-	for j, wt := range []float64{0.01, 0.02, 0.03} {
+	for j, wt := range []float64{0.1, 0.2, 0.3} {
 
 		l1wgts := []float64{wt, wt}
 		ph := NewPHReg(da, "Time", "Status").L1Weight(l1wgts).Done()
