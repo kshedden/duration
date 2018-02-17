@@ -28,7 +28,7 @@ func (p *PHParameter) GetCoeff() []float64 {
 
 // SetCoeff sets the array of model coefficients for a parameter value.
 func (p *PHParameter) SetCoeff(x []float64) {
-	copy(p.coeff, x)
+	p.coeff = x
 }
 
 // Clone returns a deep copy of the parameter value.
@@ -64,6 +64,10 @@ type PHReg struct {
 	offsetvar    string
 	offsetvarpos int
 
+	// Name and positin of a case weight variable
+	weightvarpos int
+	weightvar    string
+
 	// The sorted times at which events occur in each stratum
 	etimes [][]float64
 
@@ -79,9 +83,14 @@ type PHReg struct {
 	// the jth distinct time in stratum i
 	exit [][][]int
 
-	// The L2 norm of every covariate.  If norm=true,
+	// The L2 norms of the centered covariates.  If norm=true,
 	// calculations are done on normalized covariates.
 	xn []float64
+
+	// The mean of every covariate, used to center the covariates.
+	// Since there is no intercept in a Cox model, the covariates
+	// can be centered without further adjustment.
+	cen []float64
 
 	// If norm=true, calculations are done on normalized
 	// covariates.
@@ -116,6 +125,12 @@ type PHReg struct {
 // The number of parameters (regression coefficients).
 func (ph *PHReg) NumParams() int {
 	return len(ph.xpos)
+}
+
+// Weight sets the case weights to be used when fitting the model.
+func (ph *PHReg) Weight(name string) *PHReg {
+	ph.weightvar = name
+	return ph
 }
 
 // L2Weight sets L2 (ridge) weights to be used when fitting the model.
@@ -189,12 +204,19 @@ func (ph *PHReg) Done() *PHReg {
 	ph.getnorm()
 	ph.setupTimes()
 	ph.setupCovs()
+
+	if ph.norm && ph.start != nil {
+		for j := range ph.start {
+			ph.start[j] *= ph.xn[j]
+		}
+	}
+
 	ph.done = true
 	return ph
 }
 
 func (ph *PHReg) findvars() {
-	ph.statusvarpos, ph.timevarpos, ph.entryvarpos, ph.offsetvarpos = -1, -1, -1, -1
+	ph.statusvarpos, ph.timevarpos, ph.entryvarpos, ph.offsetvarpos, ph.weightvarpos = -1, -1, -1, -1, -1
 	for i, na := range ph.data.Names() {
 		switch na {
 		case ph.statusvar:
@@ -205,6 +227,8 @@ func (ph *PHReg) findvars() {
 			ph.entryvarpos = i
 		case ph.offsetvar:
 			ph.offsetvarpos = i
+		case ph.weightvar:
+			ph.weightvarpos = i
 		default:
 			// Everything else is a covariate
 			ph.xpos = append(ph.xpos, i)
@@ -227,18 +251,63 @@ func (ph *PHReg) findvars() {
 		msg := fmt.Sprintf("Offset variable '%s' not found\n", ph.offsetvar)
 		panic(msg)
 	}
+	if ph.weightvar != "" && ph.weightvarpos == -1 {
+		msg := fmt.Sprintf("Weight variable '%s' not found\n", ph.weightvar)
+		panic(msg)
+	}
 }
 
 func (ph *PHReg) getnorm() {
+
+	// Get the centers of the covariates
+	ph.data.Reset()
+	ph.cen = make([]float64, len(ph.xpos))
+	var n float64
+	for ph.data.Next() {
+
+		var wgt []float64
+		if ph.weightvarpos != -1 {
+			wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+		}
+
+		for j, k := range ph.xpos {
+			x := ph.data.GetPos(k).([]float64)
+			for i := range x {
+				if wgt == nil {
+					ph.cen[j] += x[i]
+					n++
+				} else {
+					ph.cen[j] += wgt[i] * x[i]
+					n += wgt[i]
+				}
+			}
+		}
+	}
+	for j := range ph.cen {
+		ph.cen[j] /= n
+	}
+
 	// Calculate the L2 norms of the covariates.
 	ph.data.Reset()
 	ph.xn = make([]float64, len(ph.xpos))
 	if ph.norm {
 		for ph.data.Next() {
+
+			var wgt []float64
+			if ph.weightvarpos != -1 {
+				wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+			}
+
 			for j, k := range ph.xpos {
 				x := ph.data.GetPos(k).([]float64)
 				for i := range x {
-					ph.xn[j] += x[i] * x[i]
+					u := x[i] - ph.cen[j]
+
+					if wgt != nil {
+						ph.xn[j] += wgt[i] * u * u
+					} else {
+						ph.xn[j] += u * u
+					}
 				}
 			}
 		}
@@ -381,10 +450,16 @@ func (ph *PHReg) setupTimes() {
 
 func (ph *PHReg) setupCovs() {
 
+	ph.sumx = ph.sumx[0:0]
 	ph.data.Reset()
 	for s := 0; ph.data.Next(); s++ {
 
 		status := ph.data.GetPos(ph.statusvarpos).([]float64)
+
+		var wgt []float64
+		if ph.weightvarpos != -1 {
+			wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+		}
 
 		// Get the sum of covariates in each stratum,
 		// including only covariates for cases with the event
@@ -393,7 +468,11 @@ func (ph *PHReg) setupCovs() {
 			x := ph.data.GetPos(j).([]float64)
 			for i, v := range x {
 				if !ph.skip[s][i] && status[i] == 1 {
-					sumx[k] += v / ph.xn[k]
+					if wgt == nil {
+						sumx[k] += (v - ph.cen[k]) / ph.xn[k]
+					} else {
+						sumx[k] += wgt[i] * (v - ph.cen[k]) / ph.xn[k]
+					}
 				}
 			}
 		}
@@ -431,11 +510,16 @@ func (ph *PHReg) breslowLogLike(params []float64) float64 {
 		tim := ph.data.GetPos(ph.timevarpos).([]float64)
 		lp := make([]float64, len(tim))
 
+		var wgt []float64
+		if ph.weightvarpos != -1 {
+			wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+		}
+
 		// Get the linear predictors
 		for k, j := range ph.xpos {
 			x := ph.data.GetPos(j).([]float64)
 			for i, v := range x {
-				lp[i] += v * params[k] / ph.xn[k]
+				lp[i] += (v - ph.cen[k]) * params[k] / ph.xn[k]
 			}
 		}
 
@@ -457,17 +541,38 @@ func (ph *PHReg) breslowLogLike(params []float64) float64 {
 
 			// Update for new entries
 			for _, i := range ph.enter[s][k] {
-				rlp += math.Exp(lp[i])
+				if wgt != nil {
+					rlp += wgt[i] * math.Exp(lp[i])
+				} else {
+					rlp += math.Exp(lp[i])
+				}
 			}
 
 			for _, i := range ph.event[s][k] {
-				ql += lp[i]
+				if wgt != nil {
+					ql += wgt[i] * lp[i]
+				} else {
+					ql += lp[i]
+				}
 			}
-			ql -= float64(len(ph.event[s][k])) * math.Log(rlp)
+
+			if wgt != nil {
+				var n float64
+				for _, i := range ph.event[s][k] {
+					n += wgt[i]
+				}
+				ql -= n * math.Log(rlp)
+			} else {
+				ql -= float64(len(ph.event[s][k])) * math.Log(rlp)
+			}
 
 			// Update for new exits
 			for _, i := range ph.exit[s][k] {
-				rlp -= math.Exp(lp[i])
+				if wgt != nil {
+					rlp -= wgt[i] * math.Exp(lp[i])
+				} else {
+					rlp -= math.Exp(lp[i])
+				}
 			}
 		}
 	}
@@ -511,6 +616,11 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 			continue
 		}
 
+		var wgt []float64
+		if ph.weightvarpos != -1 {
+			wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+		}
+
 		// Get the covariates to avoid repeated type assertions
 		var xvars [][]float64
 		for _, j := range ph.xpos {
@@ -528,7 +638,7 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 		for k := range ph.xpos {
 			x := xvars[k]
 			for i, v := range x {
-				lp[i] += v * params[k] / ph.xn[k]
+				lp[i] += (v - ph.cen[k]) * params[k] / ph.xn[k]
 			}
 		}
 
@@ -552,21 +662,33 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 			// Update for new entries
 			for _, i := range ph.enter[s][k] {
 				f := math.Exp(lp[i])
+				if wgt != nil {
+					f *= wgt[i]
+				}
 				rlp += f
 				for j, x := range xvars {
-					rlpv[j] += f * x[i] / ph.xn[j]
+					rlpv[j] += f * (x[i] - ph.cen[j]) / ph.xn[j]
 				}
 			}
 
-			d := len(ph.event[s][k])
-			floats.AddScaledTo(score, score, -float64(d)/rlp, rlpv)
+			d := float64(len(ph.event[s][k]))
+			if wgt != nil {
+				d = 0
+				for _, i := range ph.event[s][k] {
+					d += wgt[i]
+				}
+			}
+			floats.AddScaledTo(score, score, -d/rlp, rlpv)
 
 			// Update for new exits
 			for _, i := range ph.exit[s][k] {
 				f := math.Exp(lp[i])
+				if wgt != nil {
+					f *= wgt[i]
+				}
 				rlp -= f
 				for j, x := range xvars {
-					rlpv[j] -= f * x[i] / ph.xn[j]
+					rlpv[j] -= f * (x[i] - ph.cen[j]) / ph.xn[j]
 				}
 			}
 		}
@@ -601,6 +723,11 @@ func (ph *PHReg) breslowHess(params []float64, hess []float64) {
 
 	for s := 0; ph.data.Next(); s++ {
 
+		var wgt []float64
+		if ph.weightvarpos != -1 {
+			wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+		}
+
 		// Get the covariates to avoid repeated type assertions
 		var xvars [][]float64
 		for _, j := range ph.xpos {
@@ -632,8 +759,13 @@ func (ph *PHReg) breslowHess(params []float64, hess []float64) {
 
 			// Update for new entries
 			for _, i := range ph.enter[s][k] {
+
 				f := math.Exp(lp[i])
+				if wgt != nil {
+					f *= wgt[i]
+				}
 				rlp += f
+
 				for j1, x1 := range xvars {
 					d1s[j1] += f * x1[i]
 					for j2 := 0; j2 <= j1; j2++ {
@@ -647,19 +779,31 @@ func (ph *PHReg) breslowHess(params []float64, hess []float64) {
 				}
 			}
 
-			d := len(ph.event[s][k])
+			d := float64(len(ph.event[s][k]))
+			if wgt != nil {
+				d = 0
+				for _, i := range ph.event[s][k] {
+					d += wgt[i]
+				}
+			}
+
 			jj := 0
 			for j1 := 0; j1 < p; j1++ {
 				for j2 := 0; j2 < p; j2++ {
-					hess[jj] -= float64(d) * d2s[j1*p+j2] / rlp
-					hess[jj] += float64(d) * d1s[j1] * d1s[j2] / (rlp * rlp)
+					hess[jj] -= d * d2s[j1*p+j2] / rlp
+					hess[jj] += d * d1s[j1] * d1s[j2] / (rlp * rlp)
 					jj++
 				}
 			}
 
 			// Update for new exits
 			for _, i := range ph.exit[s][k] {
+
 				f := math.Exp(lp[i])
+				if wgt != nil {
+					f *= wgt[i]
+				}
+
 				rlp -= f
 				for j1, x1 := range xvars {
 					d1s[j1] -= f * x1[i]
@@ -821,17 +965,17 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 		ph.method = &optimize.BFGS{}
 	}
 
-	var xn []string
+	var xna []string
 	na := ph.data.Names()
 	for _, k := range ph.xpos {
-		xn = append(xn, na[k])
+		xna = append(xna, na[k])
 	}
 
 	optrslt, err := optimize.Local(p, ph.start, ph.settings, ph.method)
 	if err != nil {
 		// Return a partial results with an error
 		results := &PHResults{
-			BaseResults: statmodel.NewBaseResults(ph, -optrslt.F, optrslt.X, xn, nil),
+			BaseResults: statmodel.NewBaseResults(ph, -optrslt.F, optrslt.X, xna, nil),
 		}
 		ph.failMessage(optrslt)
 		return results, err
@@ -849,24 +993,10 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 	vcov, _ := statmodel.GetVcov(ph, &PHParameter{param})
 
 	results := &PHResults{
-		BaseResults: statmodel.NewBaseResults(ph, ll, param, xn, vcov),
+		BaseResults: statmodel.NewBaseResults(ph, ll, param, xna, vcov),
 	}
 
 	return results, nil
-}
-
-// ScaleVec scales a vector x (compatible in length with the parameter
-// vector), to match the internal scaling of the covariates.  If Scale
-// has not been called when constructing the model, this does nothing,
-// as no adjustment is needed.
-func (ph *PHReg) ScaleVec(x []float64) []float64 {
-
-	y := make([]float64, len(x))
-	for i := range x {
-		y[i] = ph.xn[i] * x[i]
-	}
-
-	return y
 }
 
 // Get a focusable version of the model, which can be projected onto
@@ -880,7 +1010,21 @@ func (ph *PHReg) GetFocusable() statmodel.ModelFocuser {
 	// Set up the focusable data.
 	fdat := statmodel.NewFocusData(ph.data, ph.xpos, ph.xn).Other(other).Done()
 
-	newph := NewPHReg(fdat, ph.timevar, ph.statusvar).Offset("off").Done()
+	newph := NewPHReg(fdat, ph.timevar, ph.statusvar).Offset("off")
+
+	if ph.l1wgt != nil {
+		newph = newph.L1Weight([]float64{0})
+	}
+
+	if ph.l2wgt != nil {
+		newph = newph.L2Weight([]float64{0})
+	}
+
+	if ph.entryvar != "" {
+		newph = newph.Entry(ph.entryvar)
+	}
+
+	newph = newph.Done()
 
 	return newph
 }
@@ -890,10 +1034,15 @@ func (ph *PHReg) GetFocusable() statmodel.ModelFocuser {
 // throughthe offset.  The is exposed for use in elastic net fitting
 // but is unlikely to be useful for ordinary users.  Can only be
 // called on a focusable version of the model value.
-func (ph *PHReg) Focus(j int, coeff []float64) {
+func (ph *PHReg) Focus(j int, coeff []float64, l2wgt float64) {
 	ph.data.(*statmodel.FocusData).Focus(j, coeff)
 
-	// Need to rerun this after adjusting covariates
+	if l2wgt > 0 {
+		ph.l2wgt[0] = l2wgt
+	}
+
+	// Need to rerun these after adjusting covariates
+	ph.getnorm()
 	ph.setupCovs()
 }
 
@@ -933,7 +1082,7 @@ func (ph *PHReg) fitRegularized() *PHResults {
 		coeff: make([]float64, len(ph.xpos)),
 	}
 
-	par := statmodel.FitL1Reg(ph, start, ph.l1wgt, ph.xn, true)
+	par := statmodel.FitL1Reg(ph, start, ph.l1wgt, ph.l2wgt, ph.xn, true, ph.norm)
 	coeff := par.GetCoeff()
 
 	// Since coeff is transformed back to the original scale, we
@@ -972,12 +1121,6 @@ func (rslt *PHResults) Summary() string {
 
 	l1 := ph.l1wgt != nil
 
-	if !l1 {
-		sum.ColNames = []string{"Variable   ", "Coefficient", "SE", "HR", "LCB", "UCB", "Z-score", "P-value"}
-	} else {
-		sum.ColNames = []string{"Variable   ", "Coefficient", "HR"}
-	}
-
 	fs := func(x interface{}, h string) []string {
 		y := x.([]string)
 		m := len(h)
@@ -1003,28 +1146,26 @@ func (rslt *PHResults) Summary() string {
 		return s
 	}
 
-	if !l1 {
-		sum.ColFmt = []statmodel.Fmter{fs, fn, fn, fn, fn, fn, fn, fn}
-	} else {
-		sum.ColFmt = []statmodel.Fmter{fs, fn, fn}
-	}
-
 	var hr []float64
 	for j := range rslt.Params() {
 		hr = append(hr, math.Exp(rslt.Params()[j]))
 	}
 
-	if !l1 {
+	if !l1 && (rslt.StdErr() != nil) {
+		sum.ColNames = []string{"Variable   ", "Coefficient", "SE", "HR", "LCB", "UCB", "Z-score", "P-value"}
+		sum.ColFmt = []statmodel.Fmter{fs, fn, fn, fn, fn, fn, fn, fn}
+
 		// Create estimate and CI for the hazard ratio
 		var lcb, ucb []float64
 		for j := range rslt.Params() {
 			lcb = append(lcb, math.Exp(rslt.Params()[j]-2*rslt.StdErr()[j]))
 			ucb = append(ucb, math.Exp(rslt.Params()[j]+2*rslt.StdErr()[j]))
 		}
-
 		sum.Cols = []interface{}{rslt.Names(), rslt.Params(), rslt.StdErr(), hr, lcb, ucb,
 			rslt.ZScores(), rslt.PValues()}
 	} else {
+		sum.ColNames = []string{"Variable   ", "Coefficient", "HR"}
+		sum.ColFmt = []statmodel.Fmter{fs, fn, fn}
 		sum.Cols = []interface{}{rslt.Names(), rslt.Params(), hr}
 	}
 

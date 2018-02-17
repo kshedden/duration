@@ -9,10 +9,10 @@ import (
 	"gonum.org/v1/gonum/floats"
 
 	"github.com/kshedden/dstream/dstream"
+	"github.com/kshedden/statmodel"
 )
 
-// Basic check, no strata, weights, or entry times.
-func TestPhreg1(t *testing.T) {
+func data1() dstream.Dstream {
 
 	data := `Time,Status,X
 1,1,4
@@ -27,6 +27,80 @@ func TestPhreg1(t *testing.T) {
 	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X"}).HasHeader().Done()
 	da = dstream.MemCopy(da)
 
+	return da
+}
+
+func data2() dstream.Dstream {
+	data := `Entry,Time,Status,X1,X2,Stratum
+0,1,1,4,5,1
+1,2,1,2,2,1
+0,4,0,3,3,1
+1,5,1,5,1,1
+3,4,1,1,4,1
+2,5,0,3,2,2
+1,6,1,5,2,2
+2,4,1,4,5,2
+1,6,1,2,1,2
+3,4,0,6,8,2
+5,8,1,6,4,2
+`
+
+	b := bytes.NewBuffer([]byte(data))
+	vn := []string{"Entry", "Time", "Status", "X1", "X2", "Stratum"}
+	da := dstream.FromCSV(b).SetFloatVars(vn).HasHeader().Done()
+	da = dstream.MemCopy(da)
+	da = dstream.Convert(da, "Stratum", "uint64")
+	da = dstream.Regroup(da, "Stratum", true)
+	da = dstream.DropCols(da, []string{"Stratum"})
+	return da
+}
+
+func data3() dstream.Dstream {
+	data := `Time,Status,X1,X2
+1,1,4,3
+1,1,2,2
+2,0,5,2
+3,0,6,0
+3,1,6,5
+4,0,5,4
+5,0,4,5
+5,1,3,6
+6,1,3,5
+7,1,5,4
+`
+
+	b := bytes.NewBuffer([]byte(data))
+	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X1", "X2"}).HasHeader().Done()
+	da = dstream.MemCopy(da)
+	return da
+}
+
+func data4() dstream.Dstream {
+
+	data := `Time,Status,X1,X2
+1,1,4,3
+1,1,2,2
+2,0,5,2
+3,0,6,0
+3,1,6,5
+4,0,5,4
+5,0,4,5
+5,1,3,6
+6,1,3,5
+7,1,5,4
+`
+
+	b := bytes.NewBuffer([]byte(data))
+	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X1", "X2"}).HasHeader().Done()
+	da = dstream.MemCopy(da)
+
+	return da
+}
+
+// Basic check, no strata, weights, or entry times.
+func TestPhreg1(t *testing.T) {
+
+	da := data1()
 	ph := NewPHReg(da, "Time", "Status").Done()
 
 	da.Reset()
@@ -85,28 +159,7 @@ func TestPhreg1(t *testing.T) {
 
 func TestPhreg2(t *testing.T) {
 
-	data := `Entry,Time,Status,X1,X2,Stratum
-0,1,1,4,5,1
-1,2,1,2,2,1
-0,4,0,3,3,1
-1,5,1,5,1,1
-3,4,1,1,4,1
-2,5,0,3,2,2
-1,6,1,5,2,2
-2,4,1,4,5,2
-1,6,1,2,1,2
-3,4,0,6,8,2
-5,8,1,6,4,2
-`
-
-	b := bytes.NewBuffer([]byte(data))
-	vn := []string{"Entry", "Time", "Status", "X1", "X2", "Stratum"}
-	da := dstream.FromCSV(b).SetFloatVars(vn).HasHeader().Done()
-	da = dstream.MemCopy(da)
-	da = dstream.Convert(da, "Stratum", "uint64")
-	da = dstream.Regroup(da, "Stratum", true)
-	da = dstream.DropCols(da, []string{"Stratum"})
-
+	da := data2()
 	ph := NewPHReg(da, "Time", "Status").Entry("Entry").Done()
 
 	if fmt.Sprintf("%v", ph.enter) != "[[[0 1 2 3] [] [4] []] [[0 1 2 3 4] [5] []]]" {
@@ -204,28 +257,7 @@ func TestPhreg3(t *testing.T) {
 // scale the covariates.
 func TestPhregScaling(t *testing.T) {
 
-	data := `Entry,Time,Status,X1,X2,Stratum
-0,1,1,4,5,1
-1,2,1,2,2,1
-0,4,0,3,3,1
-1,5,1,5,1,1
-3,4,1,1,4,1
-2,5,0,3,2,2
-1,6,1,5,2,2
-2,4,1,4,5,2
-1,6,1,2,1,2
-3,4,0,6,8,2
-5,8,1,6,4,2
-`
-
-	b := bytes.NewBuffer([]byte(data))
-	vn := []string{"Entry", "Time", "Status", "X1", "X2", "Stratum"}
-	da := dstream.FromCSV(b).SetFloatVars(vn).HasHeader().Done()
-	da = dstream.MemCopy(da)
-	da = dstream.Convert(da, "Stratum", "uint64")
-	da = dstream.Regroup(da, "Stratum", true)
-	da = dstream.DropCols(da, []string{"Stratum"})
-
+	da := data2()
 	ph1 := NewPHReg(da, "Time", "Status").Entry("Entry").Done()
 	ph2 := NewPHReg(da, "Time", "Status").Entry("Entry").Norm().Done()
 
@@ -247,26 +279,10 @@ func TestPhregScaling(t *testing.T) {
 	}
 }
 
-func TestRegularized(t *testing.T) {
+func TestPhregRegularized(t *testing.T) {
 
-	data := `Time,Status,X1,X2
-1,1,4,3
-1,1,2,2
-2,0,5,2
-3,0,6,0
-3,1,6,5
-4,0,5,4
-5,0,4,5
-5,1,3,6
-6,1,3,5
-7,1,5,4
-`
-
-	b := bytes.NewBuffer([]byte(data))
-	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X1", "X2"}).HasHeader().Done()
-	da = dstream.MemCopy(da)
-
-	pe := [][]float64{{-0.499512, -0.127350}, {-0.4776306, -0.11111450}, {-0.4555054, -0.0946655}}
+	da := data3()
+	pe := [][]float64{{-0.499526952, -0.127369960}, {-0.47762119, -0.1111263}, {-0.4555385, -0.094695}}
 
 	for j, wt := range []float64{0.1, 0.2, 0.3} {
 
@@ -278,9 +294,130 @@ func TestRegularized(t *testing.T) {
 		}
 
 		if !floats.EqualApprox(rslt.Params(), pe[j], 1e-5) {
-			fmt.Printf("%d\n%v\n", j, rslt.Params())
+			fmt.Printf("j=%d\nFound=%v\n", j, rslt.Params())
+			fmt.Printf("Expected=%v\n", pe[j])
+			panic("")
 			t.Fail()
 		}
 		_ = rslt.Summary()
+	}
+}
+
+func TestPhregFocus(t *testing.T) {
+
+	da := data4()
+	wt := 0.1
+	wgt := []float64{wt, wt}
+	ph := NewPHReg(da, "Time", "Status").L1Weight(wgt).L2Weight(wgt).Done()
+
+	phf := ph.GetFocusable()
+	phf.Focus(0, []float64{1, 1}, wt)
+
+	// The score at (1, 1) of the unprojected model
+	score2d := make([]float64, 2)
+	ph.Score(&PHParameter{[]float64{1, 1}}, score2d)
+
+	// The score at 1 of the projected model
+	score := make([]float64, 1)
+	phf.Score(&PHParameter{[]float64{1}}, score)
+
+	// Numerically calculate the score of the projected model
+	dl := 1e-7
+	scorenum := (phf.LogLike(&PHParameter{[]float64{1 + dl}}) - phf.LogLike(&PHParameter{[]float64{1}})) / dl
+
+	// Compare the numeric and analytic scores
+	if math.Abs(score2d[0]-scorenum) > 1e-5 {
+		t.Fail()
+	}
+	if math.Abs(score[0]-scorenum) > 1e-5 {
+		t.Fail()
+	}
+
+	// The Hessian at (1, 1) of the unprojected model
+	hess2d := make([]float64, 4)
+	ph.Hessian(&PHParameter{[]float64{1, 1}}, statmodel.ObsHess, hess2d)
+
+	// The Hessian at 1 of the projected model
+	hess := make([]float64, 1)
+	phf.Hessian(&PHParameter{[]float64{1}}, statmodel.ObsHess, hess)
+
+	// Numerically calculate the Hessian of the projected model
+	score1 := make([]float64, 1)
+	score2 := make([]float64, 1)
+	phf.Score(&PHParameter{[]float64{1 + dl}}, score1)
+	phf.Score(&PHParameter{[]float64{1}}, score2)
+	hessnum := (score1[0] - score2[0]) / dl
+
+	if math.Abs(hess2d[0]-hessnum) > 1e-5 {
+		t.Fail()
+	}
+	if math.Abs(hess[0]-hessnum) > 1e-5 {
+		t.Fail()
+	}
+}
+
+func TestWeights(t *testing.T) {
+
+	data1 := `Time,Status,X,W
+1,1,4,1
+1,1,2,2
+2,0,5,1
+3,0,6,2
+3,1,6,1
+4,0,5,2
+`
+	data2 := `Time,Status,X,W
+1,1,4,1
+1,1,2,1
+1,1,2,1
+2,0,5,1
+3,0,6,1
+3,0,6,1
+3,1,6,1
+4,0,5,1
+4,0,5,1
+`
+
+	b := bytes.NewBuffer([]byte(data1))
+	da1 := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X", "W"}).HasHeader().Done()
+	da1 = dstream.MemCopy(da1)
+
+	b = bytes.NewBuffer([]byte(data2))
+	da2 := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X", "W"}).HasHeader().Done()
+	da2 = dstream.MemCopy(da2)
+
+	ph1 := NewPHReg(da1, "Time", "Status").Weight("W").Done()
+	ph2 := NewPHReg(dstream.DropCols(da2, []string{"W"}), "Time", "Status").Done()
+	ph3 := NewPHReg(da2, "Time", "Status").Weight("W").Done()
+
+	rslt1, err := ph1.Fit()
+	if err != nil {
+		panic(err)
+	}
+
+	rslt2, err := ph2.Fit()
+	if err != nil {
+		panic(err)
+	}
+
+	rslt3, err := ph3.Fit()
+	if err != nil {
+		panic(err)
+	}
+
+	if !floats.EqualApprox(rslt1.Params(), rslt2.Params(), 1e-5) {
+		t.Fail()
+	}
+
+	if !floats.EqualApprox(rslt1.StdErr(), rslt2.StdErr(), 1e-5) {
+		t.Fail()
+	}
+
+	if !floats.EqualApprox(rslt2.Params(), rslt3.Params(), 1e-5) {
+		t.Fail()
+	}
+
+	if !floats.EqualApprox(rslt2.StdErr(), rslt3.StdErr(), 1e-5) {
+		t.Fail()
 	}
 }
