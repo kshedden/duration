@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"gonum.org/v1/gonum/floats"
+
 	"github.com/kshedden/dstream/dstream"
 )
 
@@ -24,20 +26,16 @@ func TestSF1(t *testing.T) {
 	na := []string{"Time", "Status"}
 	data := dstream.NewFromArrays(z, na)
 
-	sf := SurvfuncRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-	}
-
-	sf.Fit()
+	sf := NewSurvfuncRight(data, "Time", "Status").Done()
 
 	// Check times and risk set sizes
+	times := sf.Time()
+	nrisk := sf.NumRisk()
 	for i := 0; i < n; i++ {
-		if sf.Times[i] != float64(i) {
+		if times[i] != float64(i) {
 			t.Fail()
 		}
-		if sf.NRisk[i] != float64(n-i) {
+		if nrisk[i] != float64(n-i) {
 			t.Fail()
 		}
 	}
@@ -50,13 +48,15 @@ func TestSF1(t *testing.T) {
 		0.0798436, 0.06708204, 0.04873397}
 
 	// Check probabilities and standard errors
+	sp := sf.SurvProb()
+	spse := sf.SurvProbSE()
 	for i := 0; i < n; i++ {
 		p := 1 - float64(i+1)/float64(n)
-		if math.Abs(sf.SurvProb[i]-p) > 1e-6 {
+		if math.Abs(sp[i]-p) > 1e-6 {
 			t.Fail()
 		}
 
-		if i < n-1 && math.Abs(sf.SurvProbSE[i]-se[i]) > 1e-6 {
+		if i < n-1 && math.Abs(spse[i]-se[i]) > 1e-6 {
 			t.Fail()
 		}
 	}
@@ -82,27 +82,20 @@ func TestSF2(t *testing.T) {
 	na := []string{"Time", "Status", "Weight"}
 	data := dstream.NewFromArrays(z, na)
 
-	sf := SurvfuncRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-		WeightVar: "Weight",
-	}
-
-	sf.Fit()
+	sf := NewSurvfuncRight(data, "Time", "Status").Weight("Weight").Done()
 
 	// Check times and risk set sizes
+	times := sf.Time()
 	for i := 0; i < 10; i++ {
-		if sf.Times[i] != float64(11+2*i) {
+		if times[i] != float64(11+2*i) {
 			t.Fail()
 		}
 	}
 
-	nrisk := []float64{38, 33, 30, 26, 21, 18, 14, 9, 6, 2}
-	for i, nr := range nrisk {
-		if sf.NRisk[i] != nr {
-			t.Fail()
-		}
+	nriskExp := []float64{38, 33, 30, 26, 21, 18, 14, 9, 6, 2}
+	nrisk := sf.NumRisk()
+	if !floats.EqualApprox(nrisk, nriskExp, 1e-6) {
+		t.Fail()
 	}
 
 	// From Python Statsmodels
@@ -112,14 +105,11 @@ func TestSF2(t *testing.T) {
 		0.14185225, 0.17414403, 0.20657159, 0.35497205, 0.79120488}
 
 	// Check probabilities and standard errors
-	for i, p := range pr {
-		if math.Abs(sf.SurvProb[i]-p) > 1e-6 {
-			t.Fail()
-		}
-
-		if math.Abs(sf.SurvProbSE[i]-se[i]) > 1e-6 {
-			t.Fail()
-		}
+	if !floats.EqualApprox(pr, sf.SurvProb(), 1e-6) {
+		t.Fail()
+	}
+	if !floats.EqualApprox(se, sf.SurvProbSE(), 1e-6) {
+		t.Fail()
 	}
 }
 
@@ -143,34 +133,24 @@ func TestSF3(t *testing.T) {
 	na := []string{"Time", "Status", "Entry"}
 	data := dstream.NewFromArrays(z, na)
 
-	sf := SurvfuncRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-		EntryVar:  "Entry",
-	}
-
-	sf.Fit()
+	sf := NewSurvfuncRight(data, "Time", "Status").Entry("Entry").Done()
 
 	// Check times and risk set sizes
-	if len(sf.Times) != 10 {
+	times := sf.Time()
+	if len(times) != 10 {
 		t.Fail()
 	}
 	for i := 0; i < 10; i++ {
-		if sf.Times[i] != float64(11+2*i) {
+		if times[i] != float64(11+2*i) {
 			t.Fail()
 		}
 	}
 
 	// From Python Statsmodels
-	nrisk := []float64{11, 13, 15, 13, 11, 9, 7, 5, 3, 1}
-	if len(sf.NRisk) != len(nrisk) {
+	nriskExp := []float64{11, 13, 15, 13, 11, 9, 7, 5, 3, 1}
+	nrisk := sf.NumRisk()
+	if !floats.EqualApprox(nrisk, nriskExp, 1e-6) {
 		t.Fail()
-	}
-	for i, nr := range nrisk {
-		if sf.NRisk[i] != nr {
-			t.Fail()
-		}
 	}
 
 	// From Python Statsmodels
@@ -180,14 +160,11 @@ func TestSF3(t *testing.T) {
 		0.13018111, 0.13572541, 0.14076208, 0.14385416}
 
 	// Check probabilities and standard errors
-	for i, p := range pr {
-		if math.Abs(sf.SurvProb[i]-p) > 1e-6 {
-			t.Fail()
-		}
-
-		if i < 9 && math.Abs(sf.SurvProbSE[i]-se[i]) > 1e-6 {
-			t.Fail()
-		}
+	if !floats.EqualApprox(sf.SurvProb(), pr, 1e-6) {
+		t.Fail()
+	}
+	if !floats.EqualApprox(sf.SurvProbSE()[0:9], se[0:9], 1e-6) {
+		t.Fail()
 	}
 }
 
@@ -214,35 +191,24 @@ func TestSF4(t *testing.T) {
 	na := []string{"Time", "Status", "Entry", "Weight"}
 	data := dstream.NewFromArrays(z, na)
 
-	sf := SurvfuncRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-		EntryVar:  "Entry",
-		WeightVar: "Weight",
-	}
-
-	sf.Fit()
+	sf := NewSurvfuncRight(data, "Time", "Status").Entry("Entry").Weight("Weight").Done()
 
 	// Check times and risk set sizes
-	if len(sf.Times) != 10 {
+	times := sf.Time()
+	if len(times) != 10 {
 		t.Fail()
 	}
 	for i := 0; i < 10; i++ {
-		if sf.Times[i] != float64(11+2*i) {
+		if times[i] != float64(11+2*i) {
 			t.Fail()
 		}
 	}
 
 	// From Python Statsmodels
-	nrisk := []float64{23, 25, 30, 26, 21, 18, 14, 9, 6, 2}
-	if len(sf.NRisk) != len(nrisk) {
+	nriskExp := []float64{23, 25, 30, 26, 21, 18, 14, 9, 6, 2}
+	nrisk := sf.NumRisk()
+	if !floats.EqualApprox(nrisk, nriskExp, 1e-6) {
 		t.Fail()
-	}
-	for i, nr := range nrisk {
-		if sf.NRisk[i] != nr {
-			t.Fail()
-		}
 	}
 
 	// From Python Statsmodels
@@ -252,14 +218,11 @@ func TestSF4(t *testing.T) {
 		0.1523137, 0.18276637, 0.21389069, 0.35928061, 0.79314725}
 
 	// Check probabilities and standard errors
-	for i, p := range pr {
-		if math.Abs(sf.SurvProb[i]-p) > 1e-6 {
-			t.Fail()
-		}
-
-		if math.Abs(sf.SurvProbSE[i]-se[i]) > 1e-6 {
-			t.Fail()
-		}
+	if !floats.EqualApprox(sf.SurvProb(), pr, 1e-6) {
+		t.Fail()
+	}
+	if !floats.EqualApprox(sf.SurvProbSE(), se, 1e-6) {
+		t.Fail()
 	}
 }
 
@@ -286,35 +249,24 @@ func TestSF5(t *testing.T) {
 	na := []string{"Time", "Status", "Entry", "Weight"}
 	data := dstream.NewFromArrays(z, na)
 
-	sf := SurvfuncRight{
-		Data:      data,
-		TimeVar:   "Time",
-		StatusVar: "Status",
-		EntryVar:  "Entry",
-		WeightVar: "Weight",
-	}
-
-	sf.Fit()
+	sf := NewSurvfuncRight(data, "Time", "Status").Entry("Entry").Weight("Weight").Done()
 
 	// Check times and risk set sizes
-	if len(sf.Times) != 10 {
+	times := sf.Time()
+	if len(times) != 10 {
 		t.Fail()
 	}
 	for i := 0; i < 10; i++ {
-		if sf.Times[i] != float64(10+i) {
+		if times[i] != float64(10+i) {
 			t.Fail()
 		}
 	}
 
 	// From Python Statsmodels
-	nrisk := []float64{19, 21, 20, 19, 21, 20, 15, 12, 8, 3}
-	if len(sf.NRisk) != len(nrisk) {
+	nriskExp := []float64{19, 21, 20, 19, 21, 20, 15, 12, 8, 3}
+	nrisk := sf.NumRisk()
+	if !floats.EqualApprox(nriskExp, nrisk, 1e-6) {
 		t.Fail()
-	}
-	for i, nr := range nrisk {
-		if sf.NRisk[i] != nr {
-			t.Fail()
-		}
 	}
 
 	// From Python Statsmodels
@@ -324,13 +276,10 @@ func TestSF5(t *testing.T) {
 		0.1749728, 0.19875706, 0.21551987, 0.30548946, 0.56173484}
 
 	// Check probabilities and standard errors
-	for i, p := range pr {
-		if math.Abs(sf.SurvProb[i]-p) > 1e-6 {
-			t.Fail()
-		}
-
-		if math.Abs(sf.SurvProbSE[i]-se[i]) > 1e-6 {
-			t.Fail()
-		}
+	if !floats.EqualApprox(pr, sf.SurvProb(), 1e-6) {
+		t.Fail()
+	}
+	if !floats.EqualApprox(se, sf.SurvProbSE(), 1e-6) {
+		t.Fail()
 	}
 }

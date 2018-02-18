@@ -16,39 +16,39 @@ import (
 type SurvfuncRight struct {
 
 	// The data used to perform the estimation.
-	Data dstream.Dstream
+	data dstream.Dstream
 
 	// The name of the variable containing the minimum of the
 	// event time and entry time.  The underlying data must have
 	// float64 type.
-	TimeVar string
+	timeVar string
 
 	// The name of a variable containing the status indicator,
 	// which is 1 if the event occured at the time given by
 	// TimeVar, and 0 otherwise.  This is optional, and is assumed
 	// to be identically equal to 1 if not present.
-	StatusVar string
+	statusVar string
 
 	// The name of a variable containing case weights, optional.
-	WeightVar string
+	weightVar string
 
 	// The name of a variable containing entry times, optional.
-	EntryVar string
+	entryVar string
 
 	// Times at which events occur, sorted.
-	Times []float64
+	times []float64
 
 	// Number of events at each time in Times.
-	Events []float64
+	nEvents []float64
 
 	// Number of people at risk just before each time in Times
-	NRisk []float64
+	nRisk []float64
 
 	// The estimated survival function evaluated at each time in Times
-	SurvProb []float64
+	survProb []float64
 
 	// The standard errors for the estimates in SurvProb.
-	SurvProbSE []float64
+	survProbSE []float64
 
 	events map[float64]float64
 	total  map[float64]float64
@@ -60,27 +60,73 @@ type SurvfuncRight struct {
 	entrypos  int
 }
 
+// NewSurvfuncRight creates a new value for fitting a survival function.
+func NewSurvfuncRight(data dstream.Dstream, timevar, statusvar string) *SurvfuncRight {
+
+	return &SurvfuncRight{
+		data:      data,
+		timeVar:   timevar,
+		statusVar: statusvar,
+	}
+}
+
+// Weight specifies the name of a case weight variable.
+func (sf *SurvfuncRight) Weight(weight string) *SurvfuncRight {
+	sf.weightVar = weight
+	return sf
+}
+
+// Entry specifies the name of an entry time variable.
+func (sf *SurvfuncRight) Entry(entry string) *SurvfuncRight {
+	sf.entryVar = entry
+	return sf
+}
+
+// Time returns the times at which the survival function changes.
+func (sf *SurvfuncRight) Time() []float64 {
+	return sf.times
+}
+
+// NumRisk returns the number of people at risk at each time point
+// where the survival function changes.
+func (sf *SurvfuncRight) NumRisk() []float64 {
+	return sf.nRisk
+}
+
+// SurvProb returns the estimated survival probabilities at the points
+// where the survival function changes.
+func (sf *SurvfuncRight) SurvProb() []float64 {
+	return sf.survProb
+}
+
+// SurvProbSE returns the standard errors of the estimated survival
+// probabilities at the points where the survival function changes.
+func (sf *SurvfuncRight) SurvProbSE() []float64 {
+	return sf.survProbSE
+}
+
 func (sf *SurvfuncRight) init() {
 
 	sf.events = make(map[float64]float64)
 	sf.total = make(map[float64]float64)
 	sf.entry = make(map[float64]float64)
 
-	sf.Data.Reset()
+	sf.data.Reset()
 
 	sf.timepos = -1
 	sf.statuspos = -1
 	sf.weightpos = -1
 	sf.entrypos = -1
 
-	for k, n := range sf.Data.Names() {
-		if n == sf.TimeVar {
+	for k, na := range sf.data.Names() {
+		switch na {
+		case sf.timeVar:
 			sf.timepos = k
-		} else if n == sf.StatusVar {
+		case sf.statusVar:
 			sf.statuspos = k
-		} else if n == sf.WeightVar {
+		case sf.weightVar:
 			sf.weightpos = k
-		} else if n == sf.EntryVar {
+		case sf.entryVar:
 			sf.entrypos = k
 		}
 	}
@@ -88,27 +134,36 @@ func (sf *SurvfuncRight) init() {
 	if sf.timepos == -1 {
 		panic("Time variable not found")
 	}
+	if sf.statuspos == -1 {
+		panic("Status variable not found")
+	}
+	if sf.weightVar != "" && sf.weightpos == -1 {
+		panic("Status variable not found")
+	}
+	if sf.entryVar != "" && sf.entrypos == -1 {
+		panic("Entry variable not found")
+	}
 }
 
 func (sf *SurvfuncRight) scanData() {
 
-	for j := 0; sf.Data.Next(); j++ {
+	for j := 0; sf.data.Next(); j++ {
 
-		time := sf.Data.GetPos(sf.timepos).([]float64)
+		time := sf.data.GetPos(sf.timepos).([]float64)
 
 		var status []float64
 		if sf.statuspos != -1 {
-			status = sf.Data.GetPos(sf.statuspos).([]float64)
+			status = sf.data.GetPos(sf.statuspos).([]float64)
 		}
 
 		var entry []float64
 		if sf.entrypos != -1 {
-			entry = sf.Data.GetPos(sf.entrypos).([]float64)
+			entry = sf.data.GetPos(sf.entrypos).([]float64)
 		}
 
 		var weight []float64
 		if sf.weightpos != -1 {
-			weight = sf.Data.GetPos(sf.weightpos).([]float64)
+			weight = sf.data.GetPos(sf.weightpos).([]float64)
 		}
 
 		for i, t := range time {
@@ -147,30 +202,30 @@ func rollback(x []float64) {
 func (sf *SurvfuncRight) eventstats() {
 
 	// Get the sorted times (event or censoring)
-	sf.Times = make([]float64, len(sf.total))
+	sf.times = make([]float64, len(sf.total))
 	var i int
 	for t, _ := range sf.total {
-		sf.Times[i] = t
+		sf.times[i] = t
 		i++
 	}
-	sort.Sort(sort.Float64Slice(sf.Times))
+	sort.Sort(sort.Float64Slice(sf.times))
 
 	// Get the weighted event count and risk set size at each time
 	// point (in same order as Times).
-	sf.Events = make([]float64, len(sf.Times))
-	sf.NRisk = make([]float64, len(sf.Times))
-	for i, t := range sf.Times {
-		sf.Events[i] = sf.events[t]
-		sf.NRisk[i] = sf.total[t]
+	sf.nEvents = make([]float64, len(sf.times))
+	sf.nRisk = make([]float64, len(sf.times))
+	for i, t := range sf.times {
+		sf.nEvents[i] = sf.events[t]
+		sf.nRisk[i] = sf.total[t]
 	}
-	rollback(sf.NRisk)
+	rollback(sf.nRisk)
 
 	// Adjust for entry times
 	if sf.entrypos != -1 {
-		entry := make([]float64, len(sf.Times))
+		entry := make([]float64, len(sf.times))
 		for t, w := range sf.entry {
-			ii := sort.SearchFloat64s(sf.Times, t)
-			if t < sf.Times[ii] {
+			ii := sort.SearchFloat64s(sf.times, t)
+			if t < sf.times[ii] {
 				ii--
 			}
 			if ii >= 0 {
@@ -178,8 +233,8 @@ func (sf *SurvfuncRight) eventstats() {
 			}
 		}
 		rollback(entry)
-		for i := 0; i < len(sf.NRisk); i++ {
-			sf.NRisk[i] -= entry[i]
+		for i := 0; i < len(sf.nRisk); i++ {
+			sf.nRisk[i] -= entry[i]
 		}
 	}
 }
@@ -188,57 +243,57 @@ func (sf *SurvfuncRight) eventstats() {
 func (sf *SurvfuncRight) compress() {
 
 	var ix []int
-	for i := 0; i < len(sf.Times); i++ {
-		if sf.Events[i] > 0 {
+	for i := 0; i < len(sf.times); i++ {
+		if sf.nEvents[i] > 0 {
 			ix = append(ix, i)
 		}
 	}
 
-	if len(ix) < len(sf.Times) {
+	if len(ix) < len(sf.times) {
 		for i, j := range ix {
-			sf.Times[i] = sf.Times[j]
-			sf.Events[i] = sf.Events[j]
-			sf.NRisk[i] = sf.NRisk[j]
+			sf.times[i] = sf.times[j]
+			sf.nEvents[i] = sf.nEvents[j]
+			sf.nRisk[i] = sf.nRisk[j]
 		}
-		sf.Times = sf.Times[0:len(ix)]
-		sf.Events = sf.Events[0:len(ix)]
-		sf.NRisk = sf.NRisk[0:len(ix)]
+		sf.times = sf.times[0:len(ix)]
+		sf.nEvents = sf.nEvents[0:len(ix)]
+		sf.nRisk = sf.nRisk[0:len(ix)]
 	}
 }
 
 func (sf *SurvfuncRight) fit() {
 
-	sf.SurvProb = make([]float64, len(sf.Times))
+	sf.survProb = make([]float64, len(sf.times))
 	x := float64(1)
-	for i, _ := range sf.Times {
-		x *= 1 - sf.Events[i]/sf.NRisk[i]
-		sf.SurvProb[i] = x
+	for i, _ := range sf.times {
+		x *= 1 - sf.nEvents[i]/sf.nRisk[i]
+		sf.survProb[i] = x
 	}
 
-	sf.SurvProbSE = make([]float64, len(sf.Times))
+	sf.survProbSE = make([]float64, len(sf.times))
 	x = 0
 	if sf.weightpos == -1 {
-		for i, _ := range sf.Times {
-			d := sf.Events[i]
-			n := sf.NRisk[i]
+		for i, _ := range sf.times {
+			d := sf.nEvents[i]
+			n := sf.nRisk[i]
 			x += d / (n * (n - d))
-			sf.SurvProbSE[i] = math.Sqrt(x) * sf.SurvProb[i]
+			sf.survProbSE[i] = math.Sqrt(x) * sf.survProb[i]
 		}
 	} else {
-		for i, _ := range sf.Times {
-			d := sf.Events[i]
-			n := sf.NRisk[i]
+		for i, _ := range sf.times {
+			d := sf.nEvents[i]
+			n := sf.nRisk[i]
 			x += d / (n * n)
-			sf.SurvProbSE[i] = math.Sqrt(x)
+			sf.survProbSE[i] = math.Sqrt(x)
 		}
 	}
 }
 
-func (sf *SurvfuncRight) Fit() {
-
+func (sf *SurvfuncRight) Done() *SurvfuncRight {
 	sf.init()
 	sf.scanData()
 	sf.eventstats()
 	sf.compress()
 	sf.fit()
+	return sf
 }
