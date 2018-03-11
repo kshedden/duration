@@ -313,6 +313,12 @@ func (ph *PHReg) getnorm() {
 		}
 		for j := range ph.xn {
 			ph.xn[j] = math.Sqrt(ph.xn[j])
+			if ph.xn[j] == 0 {
+				names := ph.data.Names()
+				name := names[ph.xpos[j]]
+				msg := fmt.Sprintf("Variable %s has zero variance.\n", name)
+				panic(msg)
+			}
 		}
 	} else {
 		for k := range ph.xn {
@@ -973,6 +979,10 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 
 	optrslt, err := optimize.Local(p, ph.start, ph.settings, ph.method)
 	if err != nil {
+		if optrslt == nil {
+			return nil, err
+		}
+
 		// Return a partial results with an error
 		results := &PHResults{
 			BaseResults: statmodel.NewBaseResults(ph, -optrslt.F, optrslt.X, xna, nil),
