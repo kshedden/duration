@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/optimize"
 
 	"github.com/kshedden/dstream/dstream"
 	"github.com/kshedden/statmodel"
@@ -51,7 +52,7 @@ func data2() dstream.Dstream {
 	da = dstream.MemCopy(da)
 	da = dstream.Convert(da, "Stratum", "uint64")
 	da = dstream.Regroup(da, "Stratum", true)
-	da = dstream.DropCols(da, []string{"Stratum"})
+	da = dstream.DropCols(da, "Stratum")
 	return da
 }
 
@@ -231,7 +232,7 @@ func TestPhreg3(t *testing.T) {
 	na := []string{"time", "status", "x1", "x2", "stratum"}
 	da := dstream.NewFromArrays(dat, na)
 	da = dstream.Regroup(da, "stratum", true)
-	da = dstream.DropCols(da, []string{"stratum"})
+	da = dstream.DropCols(da, "stratum")
 
 	ph := NewPHReg(da, "time", "status").Done()
 	result, err := ph.Fit()
@@ -250,6 +251,59 @@ func TestPhreg3(t *testing.T) {
 	se := result.StdErr()
 	if !floats.EqualApprox(se, []float64{0.17171136, 0.09304276}, 1e-5) {
 		t.Fail()
+	}
+}
+
+func TestPhregMethods(t *testing.T) {
+
+	var time, status, x1, x2 []float64
+	var stratum []uint64
+
+	for i := 0; i < 100; i++ {
+		x1 = append(x1, float64(i%3))
+		x2 = append(x2, float64(i%7)-3)
+		stratum = append(stratum, uint64(i%10))
+		if i%5 == 0 {
+			status = append(status, 0)
+		} else {
+			status = append(status, 1)
+		}
+		time = append(time, 10/float64(4+i%3+i%7-3)+0.5*(float64(i%6)-2))
+	}
+
+	dat := [][]interface{}{[]interface{}{time}, []interface{}{status},
+		[]interface{}{x1}, []interface{}{x2}, []interface{}{stratum}}
+	na := []string{"time", "status", "x1", "x2", "stratum"}
+	da := dstream.NewFromArrays(dat, na)
+	da = dstream.Regroup(da, "stratum", true)
+	da = dstream.DropCols(da, "stratum")
+
+	var par [][]float64
+	var std [][]float64
+	for _, m := range []optimize.Method{
+		new(optimize.BFGS),
+		new(optimize.LBFGS),
+		new(optimize.CG),
+		new(optimize.Newton),
+		new(optimize.GradientDescent),
+		new(optimize.NelderMead),
+	} {
+		ph := NewPHReg(da, "time", "status").Optimizer(m).Done()
+		result, err := ph.Fit()
+		if err != nil {
+			panic(err)
+		}
+		par = append(par, result.Params())
+		std = append(std, result.StdErr())
+	}
+
+	for i := 1; i < len(par); i++ {
+		if !floats.EqualApprox(par[0], par[i], 1e-6) {
+			t.Fail()
+		}
+		if !floats.EqualApprox(std[0], std[i], 1e-6) {
+			t.Fail()
+		}
 	}
 }
 
@@ -387,7 +441,7 @@ func TestWeights(t *testing.T) {
 	da2 = dstream.MemCopy(da2)
 
 	ph1 := NewPHReg(da1, "Time", "Status").Weight("W").Done()
-	ph2 := NewPHReg(dstream.DropCols(da2, []string{"W"}), "Time", "Status").Done()
+	ph2 := NewPHReg(dstream.DropCols(da2, "W"), "Time", "Status").Done()
 	ph3 := NewPHReg(da2, "Time", "Status").Weight("W").Done()
 
 	rslt1, err := ph1.Fit()

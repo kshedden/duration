@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/mat"
 	"gonum.org/v1/gonum/optimize"
 
 	"github.com/kshedden/dstream/dstream"
@@ -941,6 +942,7 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 	}
 
 	nvar := len(ph.xpos)
+	hessback := make([]float64, nvar*nvar)
 
 	if ph.start == nil {
 		ph.start = make([]float64, nvar)
@@ -954,7 +956,14 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 			ph.Score(&PHParameter{x}, grad)
 			negative(grad)
 		},
-		// If we pass the Hessian we should be able to use Newton
+		Hess: func(hess mat.MutableSymmetric, x []float64) {
+			ph.Hessian(&PHParameter{x}, statmodel.ObsHess, hessback)
+			for i := 0; i < nvar; i++ {
+				for j := 0; j <= i; j++ {
+					hess.SetSym(i, j, -hessback[i*nvar+j])
+				}
+			}
+		},
 	}
 
 	if ph.settings == nil {
