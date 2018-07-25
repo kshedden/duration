@@ -5,6 +5,8 @@ marginal survival function, and estimation of the cumulative incidence
 function are supported.  The analysis functions accept data using the
 [dstream](http://github.com/kshedden/dstream) interface.
 
+Link to the [godoc documentation](https://godoc.org/github.com/kshedden/duration).
+
 Here is an example of a proportional hazards regression:
 
 ```

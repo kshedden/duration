@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 
 	"gonum.org/v1/gonum/floats"
@@ -473,5 +474,67 @@ func TestWeights(t *testing.T) {
 
 	if !floats.EqualApprox(rslt2.StdErr(), rslt3.StdErr(), 1e-5) {
 		t.Fail()
+	}
+}
+
+func TestBaselineHaz(t *testing.T) {
+
+	n := 10000
+	rand.Seed(3909)
+
+	// kw is the Weibull shape parameter.  The cumulative baseline hazard function
+	// evaluated at time t is t^kw.
+	for _, kw := range []float64{1, 2} {
+
+		x := make([]float64, n)
+		tim := make([]float64, n)
+		evt := make([]float64, n)
+
+		// Create a covariate, but there is no covariate effect in this test.
+		for i := range x {
+			x[i] = 0.2 * rand.NormFloat64()
+		}
+
+		for i := range tim {
+			tim[i] = math.Pow(-math.Log(rand.Float64()), 1/kw)
+			t := math.Pow(-math.Log(rand.Float64()), 1/kw)
+			if tim[i] > t {
+				tim[i] = t
+			} else {
+				evt[i] = 1
+			}
+		}
+
+		ar := make([][]interface{}, 3)
+		ar[0] = []interface{}{tim}
+		ar[1] = []interface{}{evt}
+		ar[2] = []interface{}{x}
+
+		df := dstream.NewFromArrays(ar, []string{"tim", "evt", "x"})
+
+		model := NewPHReg(df, "tim", "evt").Done()
+		result, err := model.Fit()
+		if err != nil {
+			panic(err)
+		}
+
+		ti, bch := model.BaselineCumHaz(0, result.Params())
+
+		// The ratios below should cluster around kw.
+		var ra, rd float64
+		for i := 1; i < len(bch); i++ {
+			r := math.Log(bch[i]) / math.Log(ti[i])
+			ra += r
+			rd += math.Abs(r - kw)
+		}
+		ra /= float64(len(bch))
+		rd /= float64(len(bch))
+
+		if math.Abs(ra-kw) > 0.07 {
+			t.Fail()
+		}
+		if rd > 0.6 {
+			t.Fail()
+		}
 	}
 }

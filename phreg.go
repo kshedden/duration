@@ -150,7 +150,9 @@ func (ph *PHReg) L1Weight(w []float64) *PHReg {
 	return ph
 }
 
-// If true, covariates are internally rescaled.
+// Calling Norm results in all covariates being internally rescaled to
+// unit norm, which may lead to better numerical stability.  The results
+// are always presented on the original scale.
 func (ph *PHReg) Norm() *PHReg {
 	ph.norm = true
 	return ph
@@ -585,6 +587,57 @@ func (ph *PHReg) breslowLogLike(params []float64) float64 {
 	}
 
 	return ql
+}
+
+// BaselineCumHaz returns the Nelson-Aalen estimator of the baseline cumulative
+// hazard function for the given stratum.
+func (ph *PHReg) BaselineCumHaz(stratum int, params []float64) ([]float64, []float64) {
+
+	h0 := make([]float64, len(ph.event[stratum]))
+
+	ph.data.Reset()
+	var tim, lp []float64
+	for s := 0; ph.data.Next(); s++ {
+
+		// Use only the chosen stratum.
+		if s != stratum {
+			continue
+		}
+
+		tim = ph.data.GetPos(ph.timevarpos).([]float64)
+		lp = make([]float64, len(tim))
+
+		// Get the linear predictors
+		for k, j := range ph.xpos {
+			x := ph.data.GetPos(j).([]float64)
+			for i, v := range x {
+				lp[i] += (v - ph.cen[k]) * params[k] / ph.xn[k]
+			}
+		}
+	}
+
+	elp := 0.0
+	for k := 0; k < len(ph.etimes[stratum]); k++ {
+
+		// Update for new entries
+		for _, i := range ph.enter[stratum][k] {
+			elp += math.Exp(lp[i])
+		}
+
+		h0[k] = float64(len(ph.event[stratum][k])) / elp
+
+		// Update for new exits
+		for _, i := range ph.exit[stratum][k] {
+			elp -= math.Exp(lp[i])
+		}
+	}
+
+	h1 := make([]float64, len(h0))
+	for i := 1; i < len(h0); i++ {
+		h1[i] = h1[i-1] + h0[i-1]
+	}
+
+	return ph.etimes[stratum], h1
 }
 
 func zero(x []float64) {
