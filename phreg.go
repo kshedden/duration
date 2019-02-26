@@ -93,9 +93,8 @@ type PHReg struct {
 	// can be centered without further adjustment.
 	cen []float64
 
-	// If norm=true, calculations are done on normalized
-	// covariates.
-	norm bool
+	// The approach for scaling the covariates
+	scaletype statmodel.ScaleType
 
 	// The sum of covariates with events in each stratum
 	sumx [][]float64
@@ -135,7 +134,7 @@ func (ph *PHReg) Weight(name string) *PHReg {
 }
 
 // L2Weight sets L2 (ridge) weights to be used when fitting the model.
-// When using regularization, consider calling Norm so that the
+// When using regularization, consider calling ScaleType so that the
 // penalties have the same impact on all covariates.
 func (ph *PHReg) L2Weight(w []float64) *PHReg {
 	ph.l2wgt = w
@@ -143,18 +142,16 @@ func (ph *PHReg) L2Weight(w []float64) *PHReg {
 }
 
 // L1Weight sets L1 (lasso) weights to be used when fitting the model.
-// When using regularization, consider calling Norm so that the
+// When using regularization, consider calling ScaleType so that the
 // penalties have the same impact on all covariates.
 func (ph *PHReg) L1Weight(w []float64) *PHReg {
 	ph.l1wgt = w
 	return ph
 }
 
-// Calling Norm results in all covariates being internally rescaled to
-// unit norm, which may lead to better numerical stability.  The results
-// are always presented on the original scale.
-func (ph *PHReg) Norm() *PHReg {
-	ph.norm = true
+// CovariateScale sets the scaling method for the covariates.
+func (ph *PHReg) CovariateScale(scaletype statmodel.ScaleType) *PHReg {
+	ph.scaletype = scaletype
 	return ph
 }
 
@@ -204,11 +201,11 @@ func (ph *PHReg) Start(start []float64) *PHReg {
 // Done signals that configuration is complete and the model can be fit.
 func (ph *PHReg) Done() *PHReg {
 	ph.findvars()
-	ph.getnorm()
+	ph.doScale()
 	ph.setupTimes()
 	ph.setupCovs()
 
-	if ph.norm && ph.start != nil {
+	if ph.scaletype != statmodel.NoScale && ph.start != nil {
 		for j := range ph.start {
 			ph.start[j] *= ph.xn[j]
 		}
@@ -260,11 +257,13 @@ func (ph *PHReg) findvars() {
 	}
 }
 
-func (ph *PHReg) getnorm() {
+func (ph *PHReg) doScale() {
+
+	ph.cen = make([]float64, len(ph.xpos))
+	ph.xn = make([]float64, len(ph.xpos))
 
 	// Get the centers of the covariates
 	ph.data.Reset()
-	ph.cen = make([]float64, len(ph.xpos))
 	var n float64
 	for ph.data.Next() {
 
@@ -286,46 +285,54 @@ func (ph *PHReg) getnorm() {
 			}
 		}
 	}
-	for j := range ph.cen {
-		ph.cen[j] /= n
+
+	floats.Scale(1/n, ph.cen)
+
+	if ph.scaletype == statmodel.NoScale {
+		for k := range ph.xn {
+			ph.xn[k] = 1
+		}
+		return
 	}
 
 	// Calculate the L2 norms of the covariates.
 	ph.data.Reset()
-	ph.xn = make([]float64, len(ph.xpos))
-	if ph.norm {
-		for ph.data.Next() {
+	for ph.data.Next() {
 
-			var wgt []float64
-			if ph.weightvarpos != -1 {
-				wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
-			}
+		var wgt []float64
+		if ph.weightvarpos != -1 {
+			wgt = ph.data.GetPos(ph.weightvarpos).([]float64)
+		}
 
-			for j, k := range ph.xpos {
-				x := ph.data.GetPos(k).([]float64)
-				for i := range x {
-					u := x[i] - ph.cen[j]
-
-					if wgt != nil {
-						ph.xn[j] += wgt[i] * u * u
-					} else {
-						ph.xn[j] += u * u
-					}
+		for j, k := range ph.xpos {
+			x := ph.data.GetPos(k).([]float64)
+			for i := range x {
+				u := x[i] - ph.cen[j]
+				if wgt != nil {
+					ph.xn[j] += wgt[i] * u * u
+				} else {
+					ph.xn[j] += u * u
 				}
 			}
 		}
-		for j := range ph.xn {
+	}
+
+	for j := range ph.xn {
+
+		switch ph.scaletype {
+		case statmodel.L2Norm:
 			ph.xn[j] = math.Sqrt(ph.xn[j])
-			if ph.xn[j] == 0 {
-				names := ph.data.Names()
-				name := names[ph.xpos[j]]
-				msg := fmt.Sprintf("Variable %s has zero variance.\n", name)
-				panic(msg)
-			}
+		case statmodel.Variance:
+			ph.xn[j] = math.Sqrt(ph.xn[j] / n)
+		default:
+			panic("Unkown scale type")
 		}
-	} else {
-		for k := range ph.xn {
-			ph.xn[k] = 1
+
+		if ph.xn[j] == 0 {
+			names := ph.data.Names()
+			name := names[ph.xpos[j]]
+			msg := fmt.Sprintf("Variable %s has zero variance.\n", name)
+			panic(msg)
 		}
 	}
 }
@@ -1114,7 +1121,7 @@ func (ph *PHReg) Focus(j int, coeff []float64, l2wgt float64) {
 	}
 
 	// Need to rerun these after adjusting covariates
-	ph.getnorm()
+	ph.doScale()
 	ph.setupCovs()
 }
 

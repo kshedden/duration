@@ -314,7 +314,7 @@ func TestPhregScaling(t *testing.T) {
 
 	da := data2()
 	ph1 := NewPHReg(da, "Time", "Status").Entry("Entry").Done()
-	ph2 := NewPHReg(da, "Time", "Status").Entry("Entry").Norm().Done()
+	ph2 := NewPHReg(da, "Time", "Status").Entry("Entry").CovariateScale(statmodel.L2Norm).Done()
 
 	r1, err := ph1.Fit()
 	if err != nil {
