@@ -283,3 +283,44 @@ func TestSF5(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestPlotSurvfunc(t *testing.T) {
+
+	for _, r := range []struct {
+		time   []float64
+		status []float64
+		fname  string
+	}{
+		{
+			time:   []float64{0, 5, 7, 9},
+			status: []float64{1, 1, 0, 1},
+			fname:  "plot1.png",
+		},
+		{
+			time:   []float64{0, 5, 7, 9},
+			status: []float64{0, 1, 0, 1},
+			fname:  "plot2.png",
+		},
+		{
+			time:   []float64{0, 5, 7, 9},
+			status: []float64{1, 1, 0, 0},
+			fname:  "plot3.png",
+		},
+		{
+			time:   []float64{0, 5, 7, 9},
+			status: []float64{0, 1, 0, 0},
+			fname:  "plot4.png",
+		},
+	} {
+		var z [][]interface{}
+		z = append(z, []interface{}{r.time})
+		z = append(z, []interface{}{r.status})
+		na := []string{"Time", "Status"}
+		data := dstream.NewFromArrays(z, na)
+
+		sf := NewSurvfuncRight(data, "Time", "Status").Done()
+
+		sp := NewSurvfuncRightPlotter()
+		sp.Add(sf, "").Width(6).Plot().Save(r.fname)
+	}
+}

@@ -1154,7 +1154,7 @@ func (ph *PHReg) fitRegularized() *PHResults {
 		coeff: make([]float64, len(ph.xpos)),
 	}
 
-	par := statmodel.FitL1Reg(ph, start, ph.l1wgt, ph.l2wgt, ph.xn, true, ph.norm)
+	par := statmodel.FitL1Reg(ph, start, ph.l1wgt, ph.l2wgt, ph.xn, true)
 	coeff := par.GetCoeff()
 
 	// Since coeff is transformed back to the original scale, we
@@ -1177,12 +1177,44 @@ func (ph *PHReg) fitRegularized() *PHResults {
 	return results
 }
 
-func (rslt *PHResults) Summary() string {
+// PHSummary summarizes a fitted proportional hazards regression model.
+type PHSummary struct {
 
-	n, e, pe, ns := rslt.summaryStats()
+	// The model
+	ph *PHReg
+
+	// The results structure
+	results *PHResults
+
+	// Transform the parameters with this function.  If nil,
+	// no transformation is applied.  If paramXform is provided,
+	// the standard error and Z-score are not shown.
+	paramXform func(float64) float64
+
+	// Messages that are appended to the table
+	messages []string
+}
+
+// Summary displays a summary table of the model results.
+func (rslt *PHResults) Summary() *PHSummary {
 
 	ph := rslt.Model().(*PHReg)
-	sum := &statmodel.Summary{}
+
+	return &PHSummary{
+		ph:      ph,
+		results: rslt,
+	}
+}
+
+// String returns a string representation of a summary table for the model.
+func (phs *PHSummary) String() string {
+
+	n, e, pe, ns := phs.results.summaryStats()
+
+	ph := phs.ph
+	sum := &statmodel.SummaryTable{
+		Msg: phs.messages,
+	}
 
 	sum.Title = "Proportional hazards regression analysis"
 
@@ -1219,26 +1251,26 @@ func (rslt *PHResults) Summary() string {
 	}
 
 	var hr []float64
-	for j := range rslt.Params() {
-		hr = append(hr, math.Exp(rslt.Params()[j]))
+	for j := range phs.results.Params() {
+		hr = append(hr, math.Exp(phs.results.Params()[j]))
 	}
 
-	if !l1 && (rslt.StdErr() != nil) {
+	if !l1 && (phs.results.StdErr() != nil) {
 		sum.ColNames = []string{"Variable   ", "Coefficient", "SE", "HR", "LCB", "UCB", "Z-score", "P-value"}
 		sum.ColFmt = []statmodel.Fmter{fs, fn, fn, fn, fn, fn, fn, fn}
 
 		// Create estimate and CI for the hazard ratio
 		var lcb, ucb []float64
-		for j := range rslt.Params() {
-			lcb = append(lcb, math.Exp(rslt.Params()[j]-2*rslt.StdErr()[j]))
-			ucb = append(ucb, math.Exp(rslt.Params()[j]+2*rslt.StdErr()[j]))
+		for j := range phs.results.Params() {
+			lcb = append(lcb, math.Exp(phs.results.Params()[j]-2*phs.results.StdErr()[j]))
+			ucb = append(ucb, math.Exp(phs.results.Params()[j]+2*phs.results.StdErr()[j]))
 		}
-		sum.Cols = []interface{}{rslt.Names(), rslt.Params(), rslt.StdErr(), hr, lcb, ucb,
-			rslt.ZScores(), rslt.PValues()}
+		sum.Cols = []interface{}{phs.results.Names(), phs.results.Params(), phs.results.StdErr(), hr, lcb, ucb,
+			phs.results.ZScores(), phs.results.PValues()}
 	} else {
 		sum.ColNames = []string{"Variable   ", "Coefficient", "HR"}
 		sum.ColFmt = []statmodel.Fmter{fs, fn, fn}
-		sum.Cols = []interface{}{rslt.Names(), rslt.Params(), hr}
+		sum.Cols = []interface{}{phs.results.Names(), phs.results.Params(), hr}
 	}
 
 	if pe > 0 {

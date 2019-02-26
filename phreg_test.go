@@ -337,7 +337,7 @@ func TestPhregScaling(t *testing.T) {
 func TestPhregRegularized(t *testing.T) {
 
 	da := data3()
-	pe := [][]float64{{-0.499526952, -0.127369960}, {-0.47762119, -0.1111263}, {-0.4555385, -0.094695}}
+	pe := [][]float64{{-0.305179, 0}, {-0.145342, 0}, {0, 0}}
 
 	for j, wt := range []float64{0.1, 0.2, 0.3} {
 
@@ -354,7 +354,7 @@ func TestPhregRegularized(t *testing.T) {
 			panic("")
 			t.Fail()
 		}
-		_ = rslt.Summary()
+		_ = rslt.Summary().String()
 	}
 }
 

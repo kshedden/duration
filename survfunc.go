@@ -7,6 +7,10 @@ import (
 	"sort"
 
 	"github.com/kshedden/dstream/dstream"
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/plotutil"
+	"gonum.org/v1/plot/vg"
 )
 
 // SurvfuncRight uses the method of Kaplan and Meier to estimate the
@@ -41,7 +45,7 @@ type SurvfuncRight struct {
 	// Number of events at each time in Times.
 	nEvents []float64
 
-	// Number of people at risk just before each time in Times
+	// Number of people at risk just before each time in times
 	nRisk []float64
 
 	// The estimated survival function evaluated at each time in Times
@@ -180,7 +184,7 @@ func (sf *SurvfuncRight) scanData() {
 
 			if sf.entrypos != -1 {
 				if entry[i] >= t {
-					msg := fmt.Sprintf("Entry time %d in chunk %d is before the event/censoring times",
+					msg := fmt.Sprintf("Entry time %d in chunk %d is before the event/censoring time\n",
 						i, j)
 					os.Stderr.WriteString(msg)
 					os.Exit(1)
@@ -201,7 +205,7 @@ func rollback(x []float64) {
 
 func (sf *SurvfuncRight) eventstats() {
 
-	// Get the sorted times (event or censoring)
+	// Get the sorted distinct times (event or censoring)
 	sf.times = make([]float64, len(sf.total))
 	var i int
 	for t, _ := range sf.total {
@@ -244,7 +248,9 @@ func (sf *SurvfuncRight) compress() {
 
 	var ix []int
 	for i := 0; i < len(sf.times); i++ {
-		if sf.nEvents[i] > 0 {
+		// Only retain events, except for the last point,
+		// which is retained even if there are no events.
+		if sf.nEvents[i] > 0 || i == len(sf.times)-1 {
 			ix = append(ix, i)
 		}
 	}
@@ -296,4 +302,118 @@ func (sf *SurvfuncRight) Done() *SurvfuncRight {
 	sf.compress()
 	sf.fit()
 	return sf
+}
+
+type SurvfuncRightPlotter struct {
+	pts []plotter.XYs
+	plt *plot.Plot
+
+	labels []string
+
+	lines []*plotter.Line
+
+	width  vg.Length
+	height vg.Length
+}
+
+func NewSurvfuncRightPlotter() *SurvfuncRightPlotter {
+
+	sp := &SurvfuncRightPlotter{
+		width:  4,
+		height: 4,
+	}
+
+	var err error
+	sp.plt, err = plot.New()
+	if err != nil {
+		panic(err)
+	}
+
+	return sp
+}
+
+func (sp *SurvfuncRightPlotter) Width(w float64) *SurvfuncRightPlotter {
+	sp.width = vg.Length(w)
+	return sp
+}
+
+func (sp *SurvfuncRightPlotter) Height(h float64) *SurvfuncRightPlotter {
+	sp.height = vg.Length(h)
+	return sp
+}
+
+func (sp *SurvfuncRightPlotter) Add(sf *SurvfuncRight, label string) *SurvfuncRightPlotter {
+
+	ti := sf.Time()
+	pr := sf.SurvProb()
+
+	m := len(ti)
+	n := 2*m + 1
+
+	pts := make(plotter.XYs, n)
+
+	j := 0
+	pts[j].X = 0
+	pts[j].Y = 1
+	j++
+
+	for i := range ti {
+		pts[j].X = ti[i]
+		pts[j].Y = pts[j-1].Y
+		j++
+		pts[j].X = ti[i]
+		pts[j].Y = pr[i]
+		j++
+	}
+
+	sp.pts = append(sp.pts, pts)
+
+	sp.labels = append(sp.labels, label)
+
+	line, err := plotter.NewLine(pts)
+	if err != nil {
+		panic(err)
+	}
+	line.Color = plotutil.Color(len(sp.lines))
+	sp.lines = append(sp.lines, line)
+
+	return sp
+}
+
+func (sp *SurvfuncRightPlotter) Plot() *SurvfuncRightPlotter {
+
+	sp.plt.Y.Min = 0
+	sp.plt.Y.Max = 1
+
+	sp.plt.X.Label.Text = "Time"
+	sp.plt.Y.Label.Text = "Proportion alive"
+
+	leg, err := plot.NewLegend()
+	if err != nil {
+		panic(err)
+	}
+
+	for i := range sp.lines {
+		sp.plt.Add(sp.lines[i])
+		leg.Add(sp.labels[i], sp.lines[i])
+	}
+
+	if len(sp.lines) > 1 {
+		leg.Top = false
+		leg.Left = true
+		sp.plt.Legend = leg
+	}
+
+	return sp
+}
+
+func (sp *SurvfuncRightPlotter) GetPlotStruct() *plot.Plot {
+	return sp.plt
+}
+
+func (sp *SurvfuncRightPlotter) Save(fname string) {
+
+	if err := sp.plt.Save(sp.width*vg.Inch, sp.height*vg.Inch, fname); err != nil {
+		panic(err)
+	}
 }
