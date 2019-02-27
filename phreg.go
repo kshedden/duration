@@ -86,12 +86,12 @@ type PHReg struct {
 
 	// The L2 norms of the centered covariates.  If norm=true,
 	// calculations are done on normalized covariates.
-	xn []float64
+	xscale []float64
 
 	// The mean of every covariate, used to center the covariates.
 	// Since there is no intercept in a Cox model, the covariates
 	// can be centered without further adjustment.
-	cen []float64
+	xmean []float64
 
 	// The approach for scaling the covariates
 	scaletype statmodel.ScaleType
@@ -207,7 +207,7 @@ func (ph *PHReg) Done() *PHReg {
 
 	if ph.scaletype != statmodel.NoScale && ph.start != nil {
 		for j := range ph.start {
-			ph.start[j] *= ph.xn[j]
+			ph.start[j] *= ph.xscale[j]
 		}
 	}
 
@@ -259,8 +259,8 @@ func (ph *PHReg) findvars() {
 
 func (ph *PHReg) doScale() {
 
-	ph.cen = make([]float64, len(ph.xpos))
-	ph.xn = make([]float64, len(ph.xpos))
+	ph.xmean = make([]float64, len(ph.xpos))
+	ph.xscale = make([]float64, len(ph.xpos))
 
 	// Get the centers of the covariates
 	ph.data.Reset()
@@ -276,21 +276,21 @@ func (ph *PHReg) doScale() {
 			x := ph.data.GetPos(k).([]float64)
 			for i := range x {
 				if wgt == nil {
-					ph.cen[j] += x[i]
+					ph.xmean[j] += x[i]
 					n++
 				} else {
-					ph.cen[j] += wgt[i] * x[i]
+					ph.xmean[j] += wgt[i] * x[i]
 					n += wgt[i]
 				}
 			}
 		}
 	}
 
-	floats.Scale(1/n, ph.cen)
+	floats.Scale(1/n, ph.xmean)
 
 	if ph.scaletype == statmodel.NoScale {
-		for k := range ph.xn {
-			ph.xn[k] = 1
+		for k := range ph.xscale {
+			ph.xscale[k] = 1
 		}
 		return
 	}
@@ -307,28 +307,28 @@ func (ph *PHReg) doScale() {
 		for j, k := range ph.xpos {
 			x := ph.data.GetPos(k).([]float64)
 			for i := range x {
-				u := x[i] - ph.cen[j]
+				u := x[i] - ph.xmean[j]
 				if wgt != nil {
-					ph.xn[j] += wgt[i] * u * u
+					ph.xscale[j] += wgt[i] * u * u
 				} else {
-					ph.xn[j] += u * u
+					ph.xscale[j] += u * u
 				}
 			}
 		}
 	}
 
-	for j := range ph.xn {
+	for j := range ph.xscale {
 
 		switch ph.scaletype {
 		case statmodel.L2Norm:
-			ph.xn[j] = math.Sqrt(ph.xn[j])
+			ph.xscale[j] = math.Sqrt(ph.xscale[j])
 		case statmodel.Variance:
-			ph.xn[j] = math.Sqrt(ph.xn[j] / n)
+			ph.xscale[j] = math.Sqrt(ph.xscale[j] / n)
 		default:
 			panic("Unkown scale type")
 		}
 
-		if ph.xn[j] == 0 {
+		if ph.xscale[j] == 0 {
 			names := ph.data.Names()
 			name := names[ph.xpos[j]]
 			msg := fmt.Sprintf("Variable %s has zero variance.\n", name)
@@ -485,9 +485,9 @@ func (ph *PHReg) setupCovs() {
 			for i, v := range x {
 				if !ph.skip[s][i] && status[i] == 1 {
 					if wgt == nil {
-						sumx[k] += (v - ph.cen[k]) / ph.xn[k]
+						sumx[k] += (v - ph.xmean[k]) / ph.xscale[k]
 					} else {
-						sumx[k] += wgt[i] * (v - ph.cen[k]) / ph.xn[k]
+						sumx[k] += wgt[i] * (v - ph.xmean[k]) / ph.xscale[k]
 					}
 				}
 			}
@@ -535,7 +535,7 @@ func (ph *PHReg) breslowLogLike(params []float64) float64 {
 		for k, j := range ph.xpos {
 			x := ph.data.GetPos(j).([]float64)
 			for i, v := range x {
-				lp[i] += (v - ph.cen[k]) * params[k] / ph.xn[k]
+				lp[i] += (v - ph.xmean[k]) * params[k] / ph.xscale[k]
 			}
 		}
 
@@ -618,7 +618,7 @@ func (ph *PHReg) BaselineCumHaz(stratum int, params []float64) ([]float64, []flo
 		for k, j := range ph.xpos {
 			x := ph.data.GetPos(j).([]float64)
 			for i, v := range x {
-				lp[i] += (v - ph.cen[k]) * params[k] / ph.xn[k]
+				lp[i] += (v - ph.xmean[k]) * params[k] / ph.xscale[k]
 			}
 		}
 	}
@@ -705,7 +705,7 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 		for k := range ph.xpos {
 			x := xvars[k]
 			for i, v := range x {
-				lp[i] += (v - ph.cen[k]) * params[k] / ph.xn[k]
+				lp[i] += (v - ph.xmean[k]) * params[k] / ph.xscale[k]
 			}
 		}
 
@@ -734,7 +734,7 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 				}
 				rlp += f
 				for j, x := range xvars {
-					rlpv[j] += f * (x[i] - ph.cen[j]) / ph.xn[j]
+					rlpv[j] += f * (x[i] - ph.xmean[j]) / ph.xscale[j]
 				}
 			}
 
@@ -755,7 +755,7 @@ func (ph *PHReg) breslowScore(params, score []float64) {
 				}
 				rlp -= f
 				for j, x := range xvars {
-					rlpv[j] -= f * (x[i] - ph.cen[j]) / ph.xn[j]
+					rlpv[j] -= f * (x[i] - ph.xmean[j]) / ph.xscale[j]
 				}
 			}
 		}
@@ -1065,7 +1065,7 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 
 	param := make([]float64, len(optrslt.X))
 	for j := range optrslt.X {
-		param[j] = optrslt.X[j] / ph.xn[j]
+		param[j] = optrslt.X[j] / ph.xscale[j]
 	}
 
 	ll := -optrslt.F
@@ -1087,7 +1087,7 @@ func (ph *PHReg) GetFocusable() statmodel.ModelFocuser {
 	other := []string{ph.timevar, ph.statusvar}
 
 	// Set up the focusable data.
-	fdat := statmodel.NewFocusData(ph.data, ph.xpos, ph.xn).Other(other).Done()
+	fdat := statmodel.NewFocusData(ph.data, ph.xpos, ph.xscale).Other(other).Done()
 
 	newph := NewPHReg(fdat, ph.timevar, ph.statusvar).Offset("off")
 
@@ -1161,13 +1161,13 @@ func (ph *PHReg) fitRegularized() *PHResults {
 		coeff: make([]float64, len(ph.xpos)),
 	}
 
-	par := statmodel.FitL1Reg(ph, start, ph.l1wgt, ph.l2wgt, ph.xn, true)
+	par := statmodel.FitL1Reg(ph, start, ph.l1wgt, ph.l2wgt, ph.xscale, true)
 	coeff := par.GetCoeff()
 
 	// Since coeff is transformed back to the original scale, we
 	// need to stop normalizing now.
-	for i, _ := range ph.xn {
-		ph.xn[i] = 1
+	for i, _ := range ph.xscale {
+		ph.xscale[i] = 1
 	}
 
 	// Covariate names
