@@ -25,8 +25,12 @@ func data1() dstream.Dstream {
 4,0,5
 `
 
+	tc := &dstream.CSVTypeConf{
+		Float64: []string{"Time", "Status", "X"},
+	}
+
 	b := bytes.NewBuffer([]byte(data))
-	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X"}).HasHeader().Done()
+	da := dstream.FromCSV(b).TypeConf(tc).HasHeader().Done()
 	da = dstream.MemCopy(da)
 
 	return da
@@ -47,11 +51,14 @@ func data2() dstream.Dstream {
 5,8,1,6,4,2
 `
 
+	tc := &dstream.CSVTypeConf{
+		Float64: []string{"Entry", "Time", "Status", "X1", "X2", "Stratum"},
+	}
+
 	b := bytes.NewBuffer([]byte(data))
-	vn := []string{"Entry", "Time", "Status", "X1", "X2", "Stratum"}
-	da := dstream.FromCSV(b).SetFloatVars(vn).HasHeader().Done()
+	da := dstream.FromCSV(b).TypeConf(tc).HasHeader().Done()
 	da = dstream.MemCopy(da)
-	da = dstream.Convert(da, "Stratum", "uint64")
+	da = dstream.Convert(da, "Stratum", dstream.Uint64)
 	da = dstream.Regroup(da, "Stratum", true)
 	da = dstream.DropCols(da, "Stratum")
 	return da
@@ -71,8 +78,12 @@ func data3() dstream.Dstream {
 7,1,5,4
 `
 
+	tc := &dstream.CSVTypeConf{
+		Float64: []string{"Time", "Status", "X1", "X2"},
+	}
+
 	b := bytes.NewBuffer([]byte(data))
-	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X1", "X2"}).HasHeader().Done()
+	da := dstream.FromCSV(b).TypeConf(tc).HasHeader().Done()
 	da = dstream.MemCopy(da)
 	return da
 }
@@ -92,8 +103,12 @@ func data4() dstream.Dstream {
 7,1,5,4
 `
 
+	tc := &dstream.CSVTypeConf{
+		Float64: []string{"Time", "Status", "X1", "X2"},
+	}
+
 	b := bytes.NewBuffer([]byte(data))
-	da := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X1", "X2"}).HasHeader().Done()
+	da := dstream.FromCSV(b).TypeConf(tc).HasHeader().Done()
 	da = dstream.MemCopy(da)
 
 	return da
@@ -433,12 +448,16 @@ func TestWeights(t *testing.T) {
 4,0,5,1
 `
 
+	tc := &dstream.CSVTypeConf{
+		Float64: []string{"Time", "Status", "X", "W"},
+	}
+
 	b := bytes.NewBuffer([]byte(data1))
-	da1 := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X", "W"}).HasHeader().Done()
+	da1 := dstream.FromCSV(b).TypeConf(tc).HasHeader().Done()
 	da1 = dstream.MemCopy(da1)
 
 	b = bytes.NewBuffer([]byte(data2))
-	da2 := dstream.FromCSV(b).SetFloatVars([]string{"Time", "Status", "X", "W"}).HasHeader().Done()
+	da2 := dstream.FromCSV(b).TypeConf(tc).HasHeader().Done()
 	da2 = dstream.MemCopy(da2)
 
 	ph1 := NewPHReg(da1, "Time", "Status").Weight("W").Done()
