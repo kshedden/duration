@@ -9,7 +9,6 @@ import (
 	"sort"
 
 	"gonum.org/v1/gonum/floats"
-	"gonum.org/v1/gonum/mat"
 	"gonum.org/v1/gonum/optimize"
 
 	"github.com/kshedden/dstream/dstream"
@@ -1002,7 +1001,6 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 	}
 
 	nvar := len(ph.xpos)
-	hessback := make([]float64, nvar*nvar)
 
 	if ph.start == nil {
 		ph.start = make([]float64, nvar)
@@ -1012,28 +1010,20 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 		Func: func(x []float64) float64 {
 			return -ph.LogLike(&PHParameter{x})
 		},
-		Grad: func(grad, x []float64) {
+		Grad: func(grad, x []float64) []float64 {
+			if len(grad) != len(x) {
+				grad = make([]float64, len(x))
+			}
 			ph.Score(&PHParameter{x}, grad)
 			negative(grad)
-		},
-		Hess: func(hess mat.MutableSymmetric, x []float64) {
-			ph.Hessian(&PHParameter{x}, statmodel.ObsHess, hessback)
-			for i := 0; i < nvar; i++ {
-				for j := 0; j <= i; j++ {
-					hess.SetSym(i, j, -hessback[i*nvar+j])
-				}
-			}
+			return grad
 		},
 	}
 
 	if ph.settings == nil {
-		ph.settings = optimize.DefaultSettings()
+		ph.settings = &optimize.Settings{}
 		ph.settings.Recorder = nil
 		ph.settings.GradientThreshold = 1e-5
-		ph.settings.FunctionConverge = &optimize.FunctionConverge{
-			Absolute:   1e-14,
-			Iterations: 200,
-		}
 	}
 
 	if ph.method == nil {
@@ -1046,7 +1036,7 @@ func (ph *PHReg) Fit() (*PHResults, error) {
 		xna = append(xna, na[k])
 	}
 
-	optrslt, err := optimize.Local(p, ph.start, ph.settings, ph.method)
+	optrslt, err := optimize.Minimize(p, ph.start, ph.settings, ph.method)
 	if err != nil {
 		if optrslt == nil {
 			return nil, err

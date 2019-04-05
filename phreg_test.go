@@ -300,7 +300,7 @@ func TestPhregMethods(t *testing.T) {
 		new(optimize.BFGS),
 		new(optimize.LBFGS),
 		new(optimize.CG),
-		new(optimize.Newton),
+		//new(optimize.Newton),
 		new(optimize.GradientDescent),
 		new(optimize.NelderMead),
 	} {
