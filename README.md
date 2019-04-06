@@ -1,6 +1,7 @@
 The __duration__ package supports fitting statistical models for event
-time data (also known as "survival analysis") in Go.  Currently, Cox
-proportional hazards regression, Kaplan-Meier estimates of the
+time data (also known as "survival analysis") in Go.
+
+Currently, proportional hazards regression ("Cox models"), Kaplan-Meier estimates of the
 marginal survival function, and estimation of the cumulative incidence
 function are supported.  The analysis functions accept data using the
 [dstream](http://github.com/kshedden/dstream) interface.
@@ -11,7 +12,7 @@ Here is an example of a proportional hazards regression:
 
 ```
 // Provide an io.Reader to the CSV-formatted data source.
-da := dstream.FromCSV(r).AllFloat().HasHeader().Done()
+da := dstream.FromCSV(r).HasHeader().Done()
 
 // Prepare a design matrix using a formula
 fml := "age + sex + severity + age*sex + age*severity"
