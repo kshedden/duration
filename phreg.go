@@ -12,7 +12,7 @@ import (
 	"gonum.org/v1/gonum/optimize"
 
 	"github.com/kshedden/dstream/dstream"
-	"github.com/kshedden/statmodel"
+	"github.com/kshedden/statmodel/statmodel"
 )
 
 // PHParameter contains a parameter value for a proportional hazards
