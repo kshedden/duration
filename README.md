@@ -1,4 +1,4 @@
-__This repository is no longer being actively developed.  See github.com/kshedden/statmodel/duration for the new version of this package.__
+__This repository is no longer being actively developed.  See (https://github.com/kshedden/statmodel/tree/master/duration) for the new version of this package.__
 
 The __duration__ package supports fitting statistical models for event
 time data (also known as "survival analysis") in Go.
