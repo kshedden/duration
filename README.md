@@ -1,3 +1,5 @@
+__This repository is no longer being actively developed.  See github.com/kshedden/statmodel/duration for the new version of this package.__
+
 The __duration__ package supports fitting statistical models for event
 time data (also known as "survival analysis") in Go.
 
@@ -11,12 +13,9 @@ Link to the [godoc documentation](https://godoc.org/github.com/kshedden/duration
 Here is an example of a proportional hazards regression:
 
 ```
-// Provide an io.Reader to the CSV-formatted data source.
-da := dstream.FromCSV(r).HasHeader().Done()
-
 // Prepare a design matrix using a formula
 fml := "age + sex + severity + age*sex + age*severity"
-dx := formula.New(fml, dx).Keep([]string{"Entry", "Time", "Status"}).Done()
+dx := formula.New(fml, dx).Keep("Entry", "Time", "Status").Done()
 da = dstream.MemCopy(dx)
 
 // Fit the model
@@ -28,6 +27,4 @@ fmt.Printf("%s\n", rslt.Summary())
 Features
 --------
 
-* Cox model supports entry times (delayed entry) and stratification
-
-* Cox model uses the Breslow log-likelihood
+* Support for entry times (delayed entry) and stratification
